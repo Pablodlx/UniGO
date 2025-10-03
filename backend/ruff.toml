@@ -1,0 +1,9 @@
+# Ruff config (compatible con nuevas versiones)
+line-length = 100
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "I", "UP", "W", "B"]  # errores básicos + isort (I) + pyupgrade
+ignore = [
+  "B008",  # allow function call in default argument in FastAPI Depends
+]

@@ -1,0 +1,8 @@
+global:
+  scrape_interval: 5s   # cada cuánto recoge métricas
+
+scrape_configs:
+  - job_name: "unigo"
+    static_configs:
+      - targets: ["host.docker.internal:8000"]  # Mac/Windows con Docker Desktop
+        # si usas Linux nativo / WSL: ["localhost:8000"]
