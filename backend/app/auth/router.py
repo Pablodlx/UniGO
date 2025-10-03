@@ -63,7 +63,7 @@ def get_current_user(
             raise credentials_exception
         return user
     except JWTError:
-        raise credentials_exception
+        raise credentials_exception from None
 
 
 @router.get("/me", response_model=UserOut)

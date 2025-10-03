@@ -16,74 +16,55 @@ def _extract_domain(email: str) -> str:
     return email.split("@", 1)[1].lower()
 
 
-def _check_allowed_domain(email: str) -> None:
+def _is_allowed_domain(domain: str) -> bool:
     if not settings.allowed_email_domains:
-        return
-    domain = _extract_domain(email)
-    allowed = [d.lower().lstrip("@") for d in settings.allowed_email_domains]
-    # Acepta si el dominio es exactamente el permitido o termina con ".permitido"
-    ok = any(domain == base or domain.endswith("." + base) for base in allowed)
-    if not ok:
+        return True
+    # permite subdominios: alumnos.ugr.es válido si ugr.es está permitido
+    return any(domain == d or domain.endswith(f".{d}") for d in settings.allowed_email_domains)
+
+
+def _issue_email_code(db: Session, email: str, purpose: str = "verify_email") -> str:
+    """
+    Crea y persiste un código de verificación de 6 dígitos con caducidad.
+    Devuelve el código generado.
+    """
+    code = f"{secrets.randbelow(10**6):06d}"
+    expires_at = datetime.now(UTC) + timedelta(minutes=settings.email_code_expire_minutes)
+    db.add(EmailCode(email=email, code=code, purpose=purpose, expires_at=expires_at))
+    db.commit()
+    return code
+
+
+def register(db: Session, data: UserCreate) -> None:
+    domain = _extract_domain(data.email)
+    if not _is_allowed_domain(domain):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Email domain '{domain}' is not allowed",
         )
 
-
-def _issue_email_code(db: Session, email: str, purpose: str = "verify_email") -> str:
-    """
-    Crea un código de verificación de 6 dígitos y lo persiste.
-    Devuelve el código generado.
-    """
-    code = f"{secrets.randbelow(10**6):06d}"
-    expires_at = datetime.now(UTC) + timedelta(minutes=settings.email_code_expire_minutes)
-    db.add(
-        EmailCode(
-            email=email,
-            code=code,
-            purpose=purpose,
-            expires_at=expires_at,
-            consumed=False,
-        )
-    )
-    db.commit()
-    return code
-
-
-def register(db: Session, data: UserCreate) -> str:
-    """
-    Registra usuario (inactivo para features restringidas) y genera código.
-    Devuelve el código para que el router lo envíe por email (y lo imprima en consola).
-    """
-    _check_allowed_domain(data.email)
-
-    existing = db.query(User).filter(User.email == data.email).first()
-    if existing:
+    if db.query(User).filter(User.email == data.email).first():
+        # Mensaje claro cuando el correo ya existe
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Ya existe una cuenta registrada con el correo {data.email}",
         )
+
     try:
-        user = User(
-            email=data.email,
-            password_hash=hash_password(data.password),
-            is_verified=False,
-        )
+        user = User(email=data.email, password_hash=hash_password(data.password))
         db.add(user)
         db.commit()
 
         code = _issue_email_code(db, data.email)
         print(f"[UniGo] Código de verificación para {data.email}: {code}")  # consola
-        return code
-    except SQLAlchemyError:
+        return None
+    except SQLAlchemyError as err:
         db.rollback()
-        raise HTTPException(status_code=500, detail="DB error during registration")
+        # B904: encadenar la excepción original
+        raise HTTPException(status_code=500, detail="DB error durante el registro") from err
 
 
 def verify_email(db: Session, email: str, code: str) -> None:
-    """
-    Verifica el email comparando el último código no consumido y no expirado.
-    """
     rec = (
         db.query(EmailCode)
         .filter(
@@ -94,23 +75,23 @@ def verify_email(db: Session, email: str, code: str) -> None:
         .order_by(EmailCode.created_at.desc())
         .first()
     )
+
     if not rec:
-        raise HTTPException(status_code=400, detail="No pending verification code")
+        raise HTTPException(status_code=400, detail="No hay código pendiente")
 
     now = datetime.now(UTC)
     if rec.expires_at < now:
-        raise HTTPException(status_code=400, detail="Verification code expired")
+        raise HTTPException(status_code=400, detail="Código de verificación caducado")
 
     if code != rec.code:
-        rec.attempts = (rec.attempts or 0) + 1
+        rec.attempts += 1
         db.commit()
-        raise HTTPException(status_code=400, detail="Invalid verification code")
+        raise HTTPException(status_code=400, detail="Código de verificación inválido")
 
-    # marcar consumido y usuario verificado
     rec.consumed = True
     user = db.query(User).filter(User.email == email).first()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
     user.is_verified = True
     db.commit()
@@ -119,9 +100,11 @@ def verify_email(db: Session, email: str, code: str) -> None:
 def login(db: Session, email: str, password: str) -> str:
     user = db.query(User).filter(User.email == email).first()
     if not user or not verify_password(password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales inválidas"
+        )
     if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User disabled")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Usuario deshabilitado")
     if not user.is_verified:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Email not verified")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Email no verificado")
     return create_access_token(sub=str(user.id))
