@@ -18,7 +18,9 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def create_access_token(sub: str, expires_minutes: int | None = None) -> str:
-    expire_delta = timedelta(minutes=expires_minutes or settings.access_token_expire_minutes)
+    expire_delta = timedelta(
+        minutes=expires_minutes or settings.access_token_expire_minutes
+    )
     to_encode = {
         "sub": sub,
         "iat": int(datetime.now(UTC).timestamp()),

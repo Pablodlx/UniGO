@@ -4,7 +4,9 @@ from fastapi import APIRouter, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-REQUEST_COUNT = Counter("unigo_requests_total", "Total HTTP requests", ["method", "path", "status"])
+REQUEST_COUNT = Counter(
+    "unigo_requests_total", "Total HTTP requests", ["method", "path", "status"]
+)
 REQUEST_LATENCY = Histogram(
     "unigo_request_duration_seconds", "Latency of HTTP requests", ["method", "path"]
 )

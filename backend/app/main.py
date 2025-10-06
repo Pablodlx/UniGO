@@ -1,8 +1,8 @@
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.router import router as auth_router
+from app.profile import router as profile_router
 
 app = FastAPI(title="UniGo", version="0.1.0")
 
@@ -26,6 +26,4 @@ def health():
 
 
 app.include_router(auth_router)
-
-from app.profile import router as profile_router
-app.include_router(profile_router.router, prefix= "/api")
+app.include_router(profile_router.router, prefix="/api")

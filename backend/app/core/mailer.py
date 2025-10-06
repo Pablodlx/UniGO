@@ -1,7 +1,7 @@
 # backend/app/core/mailer.py
+import logging
 import os
 import smtplib
-import logging
 from email.message import EmailMessage
 
 log = logging.getLogger("mailer")
@@ -9,6 +9,7 @@ log = logging.getLogger("mailer")
 MAIL_HOST = os.getenv("MAIL_HOST", "127.0.0.1")
 MAIL_PORT = int(os.getenv("MAIL_PORT", "1025"))
 MAIL_FROM = os.getenv("MAIL_FROM", "no-reply@unigo.local")
+
 
 def send_verification_email(*, to_email: str, code: str) -> None:
     """

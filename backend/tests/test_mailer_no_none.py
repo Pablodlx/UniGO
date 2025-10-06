@@ -1,5 +1,7 @@
 import pytest
+
 from app.core import mailer
+
 
 @pytest.mark.asyncio
 async def test_mailer_rejects_none():

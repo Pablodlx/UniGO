@@ -44,7 +44,10 @@ def downgrade() -> None:
         sa.Column("role", sa.VARCHAR(), autoincrement=False, nullable=False),
         sa.Column("photo_url", sa.VARCHAR(), autoincrement=False, nullable=True),
         sa.Column(
-            "rating_avg", sa.DOUBLE_PRECISION(precision=53), autoincrement=False, nullable=False
+            "rating_avg",
+            sa.DOUBLE_PRECISION(precision=53),
+            autoincrement=False,
+            nullable=False,
         ),
         sa.Column("rating_count", sa.INTEGER(), autoincrement=False, nullable=False),
         sa.PrimaryKeyConstraint("id", name="users_pkey"),
@@ -56,7 +59,10 @@ def downgrade() -> None:
         sa.Column("email", sa.VARCHAR(), autoincrement=False, nullable=False),
         sa.Column("code", sa.VARCHAR(), autoincrement=False, nullable=False),
         sa.Column(
-            "expires_at", postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=False
+            "expires_at",
+            postgresql.TIMESTAMP(timezone=True),
+            autoincrement=False,
+            nullable=False,
         ),
         sa.Column("used", sa.BOOLEAN(), autoincrement=False, nullable=False),
         sa.PrimaryKeyConstraint("id", name="email_codes_pkey"),

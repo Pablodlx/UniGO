@@ -21,7 +21,10 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     # 1) Añadir columna con default y nullable para no romper filas existentes
     op.add_column(
-        "users", sa.Column("is_verified", sa.Boolean(), nullable=True, server_default=sa.false())
+        "users",
+        sa.Column(
+            "is_verified", sa.Boolean(), nullable=True, server_default=sa.false()
+        ),
     )
 
     # 2) Asegurar que todas las filas existentes quedan en FALSE
@@ -39,7 +42,12 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("email", sa.String(length=255), nullable=False, index=True),
         sa.Column("code", sa.String(length=10), nullable=False),
-        sa.Column("purpose", sa.String(length=50), nullable=False, server_default="verify_email"),
+        sa.Column(
+            "purpose",
+            sa.String(length=50),
+            nullable=False,
+            server_default="verify_email",
+        ),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("consumed", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("attempts", sa.Integer(), nullable=False, server_default="0"),

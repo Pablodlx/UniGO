@@ -1,15 +1,21 @@
-import os, hashlib
+import hashlib
+import os
+
+from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
-from fastapi import UploadFile, HTTPException, status
+
 from app.auth.models import User
-from app.profile.schemas import ProfileUpdate, ProfileOut
+from app.profile.schemas import ProfileOut, ProfileUpdate
 
 AVATAR_DIR = os.getenv("AVATAR_DIR", "data/avatars")
 PUBLIC_PREFIX = os.getenv("AVATAR_PUBLIC_PREFIX", "/static/avatars")
 REQUIRED = ("full_name", "university", "degree", "course", "ride_intent")
 
+
 def get_profile(db: Session, user: User) -> ProfileOut:
-    ride = user.ride_intent.name if hasattr(user.ride_intent, "name") else user.ride_intent
+    ride = (
+        user.ride_intent.name if hasattr(user.ride_intent, "name") else user.ride_intent
+    )
     return ProfileOut(
         email=user.email,
         full_name=user.full_name,
@@ -19,6 +25,7 @@ def get_profile(db: Session, user: User) -> ProfileOut:
         ride_intent=ride,
         avatar_url=user.avatar_url,
     )
+
 
 def update_profile(db: Session, user: User, payload: ProfileUpdate) -> ProfileOut:
     data = payload.dict(exclude_unset=True)
@@ -30,13 +37,14 @@ def update_profile(db: Session, user: User, payload: ProfileUpdate) -> ProfileOu
     if missing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Faltan campos obligatorios: {', '.join(missing)}"
+            detail=f"Faltan campos obligatorios: {', '.join(missing)}",
         )
 
     db.add(user)
     db.commit()
     db.refresh(user)
     return get_profile(db, user)
+
 
 async def upload_avatar(db: Session, user: User, file: UploadFile) -> ProfileOut:
     if file.content_type not in {"image/png", "image/jpeg"}:
