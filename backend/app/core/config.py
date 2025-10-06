@@ -24,7 +24,8 @@ class Settings(BaseSettings):
     mail_starttls: bool = False
     mail_ssl_tls: bool = False
 
-    model_config = SettingsConfigDict(env_file="../backend/.env, .env", extra="ignore")
+# Opción simple (recomendada si arrancas desde backend/)
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @field_validator("allowed_email_domains", mode="before")
     @classmethod

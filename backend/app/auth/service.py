@@ -26,21 +26,25 @@ def _is_allowed_domain(domain: str) -> bool:
 def _issue_email_code(db: Session, email: str, purpose: str = "verify_email") -> str:
     """
     Crea y persiste un código de verificación de 6 dígitos con caducidad.
-    Devuelve el código generado.
+    Devuelve el código generado (string).
     """
-    code = f"{secrets.randbelow(10**6):06d}"
+    code = f"{secrets.randbelow(10**6):06d}"  # 6 dígitos, con ceros a la izquierda
     expires_at = datetime.now(UTC) + timedelta(minutes=settings.email_code_expire_minutes)
     db.add(EmailCode(email=email, code=code, purpose=purpose, expires_at=expires_at))
     db.commit()
     return code
 
 
-def register(db: Session, data: UserCreate) -> None:
+def register(db: Session, data: UserCreate) -> str:
+    """
+    Crea el usuario (si no existe) y genera un código de verificación.
+    DEVUELVE SIEMPRE el string del código para que el router lo envíe por email.
+    """
     domain = _extract_domain(data.email)
     if not _is_allowed_domain(domain):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Email domain '{domain}' is not allowed",
+            detail=f"El dominio de correo '{domain}' no está permitido",
         )
 
     if db.query(User).filter(User.email == data.email).first():
@@ -54,13 +58,16 @@ def register(db: Session, data: UserCreate) -> None:
         user = User(email=data.email, password_hash=hash_password(data.password))
         db.add(user)
         db.commit()
+        db.refresh(user)
 
+        # Genera y guarda el código, y DEVUÉLVELO
         code = _issue_email_code(db, data.email)
-        print(f"[UniGo] Código de verificación para {data.email}: {code}")  # consola
-        return None
+        # Log de ayuda en dev
+        print(f"[UniGo] Código de verificación para {data.email}: {code}")
+        return code
+
     except SQLAlchemyError as err:
         db.rollback()
-        # B904: encadenar la excepción original
         raise HTTPException(status_code=500, detail="DB error durante el registro") from err
 
 
