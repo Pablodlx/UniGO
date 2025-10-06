@@ -22,9 +22,7 @@ def upgrade() -> None:
     # 1) Añadir columna con default y nullable para no romper filas existentes
     op.add_column(
         "users",
-        sa.Column(
-            "is_verified", sa.Boolean(), nullable=True, server_default=sa.false()
-        ),
+        sa.Column("is_verified", sa.Boolean(), nullable=True, server_default=sa.false()),
     )
 
     # 2) Asegurar que todas las filas existentes quedan en FALSE

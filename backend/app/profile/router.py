@@ -13,9 +13,7 @@ router = APIRouter(prefix="/me", tags=["Profile"])
 
 
 @router.get("/profile", response_model=ProfileOut)
-def get_profile(
-    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
-):
+def get_profile(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     return service.get_profile(db, current_user)
 
 

@@ -20,9 +20,7 @@ def _is_allowed_domain(domain: str) -> bool:
     if not settings.allowed_email_domains:
         return True
     # permite subdominios: alumnos.ugr.es válido si ugr.es está permitido
-    return any(
-        domain == d or domain.endswith(f".{d}") for d in settings.allowed_email_domains
-    )
+    return any(domain == d or domain.endswith(f".{d}") for d in settings.allowed_email_domains)
 
 
 def _issue_email_code(db: Session, email: str, purpose: str = "verify_email") -> str:
@@ -31,9 +29,7 @@ def _issue_email_code(db: Session, email: str, purpose: str = "verify_email") ->
     Devuelve el código generado (string).
     """
     code = f"{secrets.randbelow(10**6):06d}"  # 6 dígitos, con ceros a la izquierda
-    expires_at = datetime.now(UTC) + timedelta(
-        minutes=settings.email_code_expire_minutes
-    )
+    expires_at = datetime.now(UTC) + timedelta(minutes=settings.email_code_expire_minutes)
     db.add(EmailCode(email=email, code=code, purpose=purpose, expires_at=expires_at))
     db.commit()
     return code
@@ -72,9 +68,7 @@ def register(db: Session, data: UserCreate) -> str:
 
     except SQLAlchemyError as err:
         db.rollback()
-        raise HTTPException(
-            status_code=500, detail="DB error durante el registro"
-        ) from err
+        raise HTTPException(status_code=500, detail="DB error durante el registro") from err
 
 
 def verify_email(db: Session, email: str, code: str) -> None:
@@ -117,11 +111,7 @@ def login(db: Session, email: str, password: str) -> str:
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales inválidas"
         )
     if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Usuario deshabilitado"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Usuario deshabilitado")
     if not user.is_verified:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Email no verificado"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Email no verificado")
     return create_access_token(sub=str(user.id))

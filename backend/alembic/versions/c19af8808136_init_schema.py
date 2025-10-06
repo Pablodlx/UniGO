@@ -30,9 +30,7 @@ def upgrade() -> None:
         sa.Column("used", sa.Boolean(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(
-        op.f("ix_email_codes_email"), "email_codes", ["email"], unique=False
-    )
+    op.create_index(op.f("ix_email_codes_email"), "email_codes", ["email"], unique=False)
     op.create_table(
         "users",
         sa.Column("id", sa.String(), nullable=False),

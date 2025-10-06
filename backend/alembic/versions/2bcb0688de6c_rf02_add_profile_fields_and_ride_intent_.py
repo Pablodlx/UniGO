@@ -25,15 +25,11 @@ def upgrade() -> None:
 
     # Añade columnas de perfil (todas NULLables; la obligatoriedad se valida en la app)
     op.add_column("users", sa.Column("full_name", sa.String(length=150), nullable=True))
-    op.add_column(
-        "users", sa.Column("university", sa.String(length=150), nullable=True)
-    )
+    op.add_column("users", sa.Column("university", sa.String(length=150), nullable=True))
     op.add_column("users", sa.Column("degree", sa.String(length=150), nullable=True))
     op.add_column("users", sa.Column("course", sa.Integer(), nullable=True))
     op.add_column("users", sa.Column("ride_intent", ride_enum, nullable=True))
-    op.add_column(
-        "users", sa.Column("avatar_url", sa.String(length=300), nullable=True)
-    )
+    op.add_column("users", sa.Column("avatar_url", sa.String(length=300), nullable=True))
 
 
 def downgrade() -> None:

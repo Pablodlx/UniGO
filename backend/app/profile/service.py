@@ -13,9 +13,7 @@ REQUIRED = ("full_name", "university", "degree", "course", "ride_intent")
 
 
 def get_profile(db: Session, user: User) -> ProfileOut:
-    ride = (
-        user.ride_intent.name if hasattr(user.ride_intent, "name") else user.ride_intent
-    )
+    ride = user.ride_intent.name if hasattr(user.ride_intent, "name") else user.ride_intent
     return ProfileOut(
         email=user.email,
         full_name=user.full_name,

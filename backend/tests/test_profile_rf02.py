@@ -50,6 +50,4 @@ def test_avatar(auth_client):
     r = auth_client.post("/me/avatar", files=files)
     assert r.status_code == 200
     j = r.json()
-    assert isinstance(j["avatar_url"], str) and j["avatar_url"].endswith(
-        (".png", ".jpg", ".jpeg")
-    )
+    assert isinstance(j["avatar_url"], str) and j["avatar_url"].endswith((".png", ".jpg", ".jpeg"))
