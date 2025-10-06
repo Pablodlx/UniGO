@@ -1,5 +1,4 @@
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.router import router as auth_router
@@ -26,6 +25,3 @@ def health():
 
 
 app.include_router(auth_router)
-
-from app.profile import router as profile_router
-app.include_router(profile_router.router, prefix= "/api")
