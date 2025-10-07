@@ -76,7 +76,7 @@ MAIL_SSL_TLS=False
 
 ALLOWED_EMAIL_DOMAINS=ugr.es, us.es, uma.es, ucm.es, upm.es, uab.cat, ub.edu, uoc.edu, upc.edu, upf.edu, ehu.eus, unizar.es, upna.es, uva.es, uclm.es, uniovi.es, unileon.es, unican.es, uib.es, ulpgc.es, um.es, upct.es, uex.es
 
-Guardamos el archivo y volvemos al directorio principal:
+**Guardamos el archivo y volvemos al directorio principal:**
 
 `cd ..`
 
