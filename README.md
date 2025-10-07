@@ -34,11 +34,11 @@ Infra con Postgres, Prometheus y Grafana para observabilidad.
 
 # 🚀 Puesta en marcha de la aplicación.
 
-**Clonar el repo:**
+## Clonar el repo:
 
 `git clone https://github.com/Pablodlx/UniGo.git` 
 
-### Infraestructura (Postgres, MailHog, Prometheus, Grafana)
+## Infraestructura (Postgres, MailHog, Prometheus, Grafana)
 
 `make infra-up`
 
