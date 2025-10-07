@@ -58,15 +58,8 @@ ACCESS_TOKEN_EXPIRE_MINUTES=60
 
 DATABASE_URL=postgresql+psycopg2://unigo:unigo@localhost:5432/unigo
 
-Código de verificación (minutos)
-
 EMAIL_CODE_EXPIRE_MINUTES=15
 
-Dominios válidos (CSV o JSON, se permite subdominios)
-
-ALLOWED_EMAIL_DOMAINS=ugr.es, us.es, uma.es, ucm.es, upm.es, uab.cat, ub.edu, uoc.edu, upc.edu, upf.edu, ehu.eus, unizar.es, upna.es, uva.es, uclm.es, uniovi.es, unileon.es, unican.es, uib.es, ulpgc.es, um.es, upct.es, uex.es
-
-## Correo dev (MailHog)
 MAIL_USERNAME=
 
 MAIL_PASSWORD=
@@ -80,6 +73,8 @@ MAIL_SERVER=127.0.0.1
 MAIL_STARTTLS=False
 
 MAIL_SSL_TLS=False
+
+ALLOWED_EMAIL_DOMAINS=ugr.es, us.es, uma.es, ucm.es, upm.es, uab.cat, ub.edu, uoc.edu, upc.edu, upf.edu, ehu.eus, unizar.es, upna.es, uva.es, uclm.es, uniovi.es, unileon.es, unican.es, uib.es, ulpgc.es, um.es, upct.es, uex.es
 
 ## Migraciones
 `make migrate`
