@@ -24,6 +24,7 @@ infra-logs:
 # -------- Backend --------
 .PHONY: backend-setup backend migrate revision lint fmt test
 backend-setup:
+	rm -rf backend/.venv
 	cd $(BACKEND) && python3 -m venv .venv
 	$(ACTIVATE) && pip install -U pip && pip install -r $(BACKEND)/requirements.txt || true
 
