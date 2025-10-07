@@ -36,18 +36,16 @@ Infra con Postgres, Prometheus y Grafana para observabilidad.
 
 **Clona** el repo:
 
-```bash
+
 git clone https://github.com/Pablodlx/UniGo.git
 cd UniGo
 
 ## Infraestructura (Postgres, MailHog, Prometheus, Grafana)
 
-```bash
 make infra-up
 
 ## Backend (crea venv e instala dependencias)
 
-```bash
 make backend-setup
 
 ## Config .env (backend)
@@ -78,17 +76,15 @@ MAIL_SSL_TLS=False
 
 ## Migraciones
 
-```bash
 make migrate
 
 ## Levantar backend 
 
-```bash
 make backend
 
 ## Frontend
 
-```bash
+
 make frontend-setup
 make frontend
 Frontend dev: http://127.0.0.1:3001
@@ -113,11 +109,9 @@ Linter:
 
 make lint
 
-
 Formateo:
 
 make fmt
-
 
 Tests:
 
@@ -126,7 +120,6 @@ make test
 ## Parada y limpieza
 
 make infra-down
-
 
 ## Autores
 
