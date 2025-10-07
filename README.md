@@ -117,4 +117,5 @@ Si usas Grafana fuera de Docker, usa http://127.0.0.1:9090
 ## Parada y limpieza
 `make infra-down`
 
+
 **Equipo UniGO - 2025**
