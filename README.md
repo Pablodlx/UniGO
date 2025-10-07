@@ -34,7 +34,7 @@ Infra con Postgres, Prometheus y Grafana para observabilidad.
 
 ## 🚀 Puesta en marcha rápida (Makefile)
 
-1) **Clona** el repo:
+**Clona** el repo:
 
 ```bash
 git clone https://github.com/Pablodlx/UniGo.git
