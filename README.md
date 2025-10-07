@@ -35,34 +35,29 @@ Infra con Postgres, Prometheus y Grafana para observabilidad.
 ## 🚀 Puesta en marcha rápida (Makefile)
 
 **Clona** el repo:
-
-
-git clone https://github.com/Pablodlx/UniGo.git
-cd UniGo
+`git clone https://github.com/Pablodlx/UniGo.git` 
 
 ## Infraestructura (Postgres, MailHog, Prometheus, Grafana)
 
-make infra-up
+`make infra-up`
 
 ## Backend (crea venv e instala dependencias)
-
-make backend-setup
+`make backend-setup`
 
 ## Config .env (backend)
+`cd backend`
+`nano .env`
 
-cd backend
-nano .env
-
-Usar esta plantilla:
-# backend/.env
+**Usar esta plantilla:**
+backend/.env
 SECRET_KEY=super-secret-cambia-esto
 ACCESS_TOKEN_EXPIRE_MINUTES=60
 DATABASE_URL=postgresql+psycopg2://unigo:unigo@localhost:5432/unigo
 
-# Código de verificación (minutos)
+Código de verificación (minutos)
 EMAIL_CODE_EXPIRE_MINUTES=15
 
-# Dominios válidos (CSV o JSON, se permite subdominios)
+Dominios válidos (CSV o JSON, se permite subdominios)
 ALLOWED_EMAIL_DOMAINS=ugr.es, us.es, uma.es, ucm.es, upm.es, uab.cat, ub.edu, uoc.edu, upc.edu, upf.edu, ehu.eus, unizar.es, upna.es, uva.es, uclm.es, uniovi.es, unileon.es, unican.es, uib.es, ulpgc.es, um.es, upct.es, uex.es
 
 # Correo dev (MailHog)
@@ -75,20 +70,16 @@ MAIL_STARTTLS=False
 MAIL_SSL_TLS=False
 
 ## Migraciones
-
-make migrate
+`make migrate`
 
 ## Levantar backend 
-
-make backend
+`make backend`
 
 ## Frontend
+`make frontend-setup`
+`make frontend`
 
-
-make frontend-setup
-make frontend
 Frontend dev: http://127.0.0.1:3001
-
 Configurable con frontend/.env:
 VITE_API_BASE=http://127.0.0.1:8000
 
@@ -104,22 +95,17 @@ Data Source: Prometheus → URL http://prometheus:9090 (si Grafana está en el m
 Si usas Grafana fuera de Docker, usa http://127.0.0.1:9090
 
 ## Calidad
+**Linter:**
+`make lint`
 
-Linter:
+**Formateo:**
+`make fmt`
 
-make lint
-
-Formateo:
-
-make fmt
-
-Tests:
-
-make test
+**Tests:**
+`make test`
 
 ## Parada y limpieza
-
-make infra-down
+`make infra-down`
 
 ## Autores
 
