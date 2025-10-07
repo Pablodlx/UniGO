@@ -46,6 +46,7 @@ Infra con Postgres, Prometheus y Grafana para observabilidad.
 
 ## Config .env (backend)
 `cd backend`
+
 `nano .env`
 
 **Usar esta plantilla:**
@@ -60,7 +61,7 @@ EMAIL_CODE_EXPIRE_MINUTES=15
 Dominios válidos (CSV o JSON, se permite subdominios)
 ALLOWED_EMAIL_DOMAINS=ugr.es, us.es, uma.es, ucm.es, upm.es, uab.cat, ub.edu, uoc.edu, upc.edu, upf.edu, ehu.eus, unizar.es, upna.es, uva.es, uclm.es, uniovi.es, unileon.es, unican.es, uib.es, ulpgc.es, um.es, upct.es, uex.es
 
-# Correo dev (MailHog)
+## Correo dev (MailHog)
 MAIL_USERNAME=
 MAIL_PASSWORD=
 MAIL_FROM=unigo@soporte.com
