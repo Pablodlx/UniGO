@@ -32,7 +32,7 @@ Infra con Postgres, Prometheus y Grafana para observabilidad.
 
 ---
 
-## 🚀 Puesta en marcha de la aplicación.
+# 🚀 Puesta en marcha de la aplicación.
 
 **Clonar el repo:**
 
