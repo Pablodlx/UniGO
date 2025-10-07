@@ -51,7 +51,6 @@ Infra con Postgres, Prometheus y Grafana para observabilidad.
 `nano .env`
 
 **Usar esta plantilla:**
-backend/.env
 
 SECRET_KEY=super-secret-cambia-esto
 
