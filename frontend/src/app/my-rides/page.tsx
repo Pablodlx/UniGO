@@ -1,0 +1,355 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import DesktopLayout from "@/components/DesktopLayout";
+import { getToken, Ride, getMyRides, getMyBookings } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+
+export default function MyRidesPage() {
+  const router = useRouter();
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [driverRides, setDriverRides] = useState<Ride[]>([]);
+  const [bookings, setBookings] = useState<Ride[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showInactive, setShowInactive] = useState(false);
+  const [activeTab, setActiveTab] = useState<'driver' | 'passenger'>('driver');
+
+  useEffect(() => {
+    const token = getToken();
+    setIsLoggedIn(!!token);
+    
+    if (token) {
+      fetchMyRides();
+      fetchMyBookings();
+    } else {
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchMyRides = async () => {
+    try {
+      setLoading(true);
+      const rides = await getMyRides();
+      setDriverRides(rides);
+    } catch (error) {
+      console.error("Error fetching my rides:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchMyBookings = async () => {
+    try {
+      const bookings = await getMyBookings();
+      setBookings(bookings);
+    } catch (error) {
+      console.error("Error fetching bookings:", error);
+    }
+  };
+
+  const handleProfileClick = () => {
+    if (isLoggedIn) {
+      router.push("/profile");
+    } else {
+      router.push("/login");
+    }
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+      weekday: 'short', 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric' 
+    });
+  };
+
+  const getStatusBadge = (isActive: boolean) => {
+    if (isActive) {
+      return (
+        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+          Publicado
+        </span>
+      );
+    } else {
+      return (
+        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+          Inactivo
+        </span>
+      );
+    }
+  };
+
+  const displayedRides = showInactive 
+    ? driverRides 
+    : driverRides.filter(ride => ride.is_active);
+
+  // Redirect if not logged in
+  useEffect(() => {
+    if (!isLoggedIn && !loading) {
+      router.push("/login");
+    }
+  }, [isLoggedIn, loading, router]);
+
+  if (loading) {
+    return (
+      <DesktopLayout showSidebar={false}>
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto mb-4"></div>
+            <p className="text-gray-600">Cargando tus viajes...</p>
+          </div>
+        </div>
+      </DesktopLayout>
+    );
+  }
+
+  return (
+    <DesktopLayout showSidebar={false}>
+      <div className="min-h-screen bg-gray-50">
+        {/* Header */}
+        <div className="bg-white shadow-sm border-b border-gray-200">
+          <div className="px-8 py-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-orange-500 rounded-lg flex items-center justify-center shadow-md">
+                  <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"/>
+                    <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1V8a1 1 0 00-1-1h-3z"/>
+                  </svg>
+                </div>
+                <span className="text-2xl font-bold text-gray-800">UniGO</span>
+              </div>
+
+              <div className="flex items-center space-x-8">
+                <Link href="/" className="flex items-center space-x-2 text-gray-600 hover:text-orange-600 transition-colors font-medium">
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.707.707a1 1 0 001.414-1.414l-7-7z"/>
+                  </svg>
+                  <span>Inicio</span>
+                </Link>
+                <button className="flex items-center space-x-2 text-gray-700 hover:text-orange-600 transition-colors font-medium">
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd"/>
+                  </svg>
+                  <span>Mis Viajes</span>
+                </button>
+                <button
+                  onClick={handleProfileClick}
+                  className="flex items-center space-x-2 text-gray-600 hover:text-orange-600 transition-colors font-medium cursor-pointer"
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd"/>
+                  </svg>
+                  <span>Perfil</span>
+                </button>
+                <Link href="/post-ride" className="bg-orange-500 text-white px-6 py-2 rounded-lg font-medium hover:bg-orange-600 transition-colors flex items-center space-x-2 shadow-md">
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd"/>
+                  </svg>
+                  <span>Publicar Viaje</span>
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Main Content */}
+        <div className="max-w-7xl mx-auto px-8 py-12">
+          {/* Page Header with Tabs */}
+          <div className="mb-8">
+            <h1 className="text-4xl font-bold text-gray-800 mb-6">Mis Viajes</h1>
+            
+            {/* Tabs */}
+            <div className="flex space-x-4 border-b border-gray-200">
+              <button
+                onClick={() => setActiveTab('driver')}
+                className={`pb-4 px-6 font-semibold text-lg border-b-2 transition-colors ${
+                  activeTab === 'driver'
+                    ? 'border-orange-500 text-orange-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Mis viajes como conductor
+              </button>
+              <button
+                onClick={() => setActiveTab('passenger')}
+                className={`pb-4 px-6 font-semibold text-lg border-b-2 transition-colors ${
+                  activeTab === 'passenger'
+                    ? 'border-orange-500 text-orange-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Mis reservas como pasajero
+              </button>
+            </div>
+          </div>
+
+          {/* Toggle Button (only show for driver tab) */}
+          {activeTab === 'driver' && (
+            <div className="mb-6">
+              <button
+                onClick={() => setShowInactive(!showInactive)}
+                className="text-orange-600 hover:text-orange-700 font-medium"
+              >
+                {showInactive ? "Mostrar Solo Viajes Activos" : "Mostrar También Viajes Inactivos"}
+              </button>
+            </div>
+          )}
+
+          {/* Content Based on Active Tab */}
+          {activeTab === 'driver' ? (
+            /* My trips as a driver */
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
+              {displayedRides.length === 0 ? (
+                <div className="text-center py-12">
+                  <svg className="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <p className="text-gray-600 text-lg mb-2">Aún no hay viajes</p>
+                  <p className="text-gray-500">¡Comienza compartiendo tu viaje publicando un viaje!</p>
+                  <Link href="/post-ride" className="mt-4 inline-block bg-orange-500 text-white px-6 py-3 rounded-lg font-medium hover:bg-orange-600 transition-colors">
+                    Publica Tu Primer Viaje
+                  </Link>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {displayedRides.map((ride) => (
+                    <div
+                      key={ride.id}
+                      className="border border-gray-200 rounded-xl p-6 hover:shadow-md transition-shadow"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-3 mb-3">
+                            {getStatusBadge(ride.is_active)}
+                          </div>
+                          
+                          <div className="flex items-start space-x-6 mb-4">
+                            <div className="flex items-center space-x-2">
+                              <div className="text-2xl font-bold text-gray-800">{ride.departure_time}</div>
+                              <div>
+                                <div className="text-lg font-semibold text-gray-900">{ride.departure_city}</div>
+                                <div className="text-sm text-gray-500">{formatDate(ride.departure_date)}</div>
+                              </div>
+                            </div>
+                            
+                            <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                            </svg>
+                            
+                            <div>
+                              <div className="text-lg font-semibold text-gray-900">{ride.destination_city}</div>
+                            </div>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-600">
+                            <div>
+                              <span className="font-medium text-gray-900">Asientos disponibles:</span> {ride.available_seats}
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-900">Precio por asiento:</span> {ride.price_per_seat.toFixed(2)} €
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-900">Vehículo:</span> {ride.vehicle_info || 'N/A'}
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-900">Creado:</span> {new Date(ride.created_at).toLocaleDateString()}
+                            </div>
+                          </div>
+                          
+                          {ride.additional_details && (
+                            <div className="mt-3 text-sm text-gray-600 bg-gray-50 rounded-lg p-3">
+                              <span className="font-medium text-gray-900">Details:</span> {ride.additional_details}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            /* My bookings as a passenger */
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
+              {bookings.length === 0 ? (
+                <div className="text-center py-12">
+                  <svg className="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                  <p className="text-gray-600 text-lg mb-2">Aún no hay reservas</p>
+                  <p className="text-gray-500">Reserva asientos en viajes disponibles para verlos aquí</p>
+                  <Link href="/" className="mt-4 inline-block text-orange-600 hover:text-orange-700 font-medium">
+                    Explorar Viajes Disponibles →
+                  </Link>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {bookings.map((ride) => (
+                    <div
+                      key={ride.id}
+                      className="border border-gray-200 rounded-xl p-6 hover:shadow-md transition-shadow"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2 mb-3">
+                            <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
+                              Reservado
+                            </span>
+                          </div>
+                          
+                          <div className="flex items-start space-x-6 mb-4">
+                            <div className="flex items-center space-x-2">
+                              <div className="text-2xl font-bold text-gray-800">{ride.departure_time}</div>
+                              <div>
+                                <div className="text-lg font-semibold text-gray-900">{ride.departure_city}</div>
+                                <div className="text-sm text-gray-500">{formatDate(ride.departure_date)}</div>
+                              </div>
+                            </div>
+                            
+                            <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                            </svg>
+                            
+                            <div>
+                              <div className="text-lg font-semibold text-gray-900">{ride.destination_city}</div>
+                            </div>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-600">
+                            <div>
+                              <span className="font-medium text-gray-900">Conductor:</span> {ride.driver_name}
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-900">Asientos disponibles:</span> {ride.available_seats}
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-900">Precio por asiento:</span> {ride.price_per_seat.toFixed(2)} €
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-900">Vehículo:</span> {ride.vehicle_info || 'N/A'}
+                            </div>
+                          </div>
+                          
+                          {ride.additional_details && (
+                            <div className="mt-3 text-sm text-gray-600 bg-gray-50 rounded-lg p-3">
+                              <span className="font-medium text-gray-900">Details:</span> {ride.additional_details}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </DesktopLayout>
+  );
+}
+

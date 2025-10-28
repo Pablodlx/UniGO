@@ -1,4 +1,4 @@
-#!/home/pablo/Proyecto-ISO/backend/.venv/bin/python
+#!/home/alberto/UniGO/backend/.venv/bin/python3
 # -*- coding: utf-8 -*-
 import re
 import sys

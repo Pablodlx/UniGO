@@ -1,8 +1,8 @@
 import enum
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Enum, Integer, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Boolean, Column, DateTime, Enum, Integer, String, Text, Float, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
 
@@ -29,6 +29,10 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
+    
+    # Relationships
+    rides: Mapped[list["Ride"]] = relationship("Ride", back_populates="driver")
+    bookings: Mapped[list["Booking"]] = relationship("Booking", back_populates="passenger")
 
 
 class EmailCode(Base):
@@ -43,3 +47,48 @@ class EmailCode(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
+
+
+class BookingStatus(str, enum.Enum):
+    pending = "pending"
+    confirmed = "confirmed"
+    canceled = "canceled"
+
+
+class Ride(Base):
+    __tablename__ = "rides"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    driver_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    departure_city: Mapped[str] = mapped_column(String(100), nullable=False)
+    destination_city: Mapped[str] = mapped_column(String(100), nullable=False)
+    departure_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    departure_time: Mapped[str] = mapped_column(String(10), nullable=False)  # "HH:MM" format
+    available_seats: Mapped[int] = mapped_column(Integer, nullable=False)
+    price_per_seat: Mapped[float] = mapped_column(Float, nullable=False)
+    vehicle_info: Mapped[str] = mapped_column(String(200), nullable=True)
+    additional_details: Mapped[str] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    
+    # Relationship to User
+    driver: Mapped["User"] = relationship("User", back_populates="rides")
+    # Relationship to Bookings
+    bookings: Mapped[list["Booking"]] = relationship("Booking", back_populates="ride")
+
+
+class Booking(Base):
+    __tablename__ = "bookings"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    ride_id: Mapped[int] = mapped_column(ForeignKey("rides.id"), nullable=False)
+    passenger_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    status: Mapped[BookingStatus] = mapped_column(Enum(BookingStatus), default=BookingStatus.pending, nullable=False)
+    seats: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    
+    # Relationships
+    ride: Mapped["Ride"] = relationship("Ride", back_populates="bookings")
+    passenger: Mapped["User"] = relationship("User", back_populates="bookings")

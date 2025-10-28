@@ -84,3 +84,19 @@ def me(current: User = Depends(get_current_user)) -> UserOut:
     Devuelve los datos públicos del usuario autenticado.
     """
     return current
+
+
+@router.post("/verify-manual", status_code=204)
+def verify_user_manually_endpoint(
+    payload: dict,
+    db: Session = Depends(get_db),
+) -> Response:
+    """
+    Manually verify a user by email (development/testing only).
+    """
+    email = payload.get("email")
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required")
+    
+    service.verify_user_manually(db, email)
+    return Response(status_code=204)

@@ -153,7 +153,9 @@ def prompt(
     if value_proc is None:
         value_proc = convert_type(type, default)
 
-    prompt = _build_prompt(text, prompt_suffix, show_default, default, show_choices, type)
+    prompt = _build_prompt(
+        text, prompt_suffix, show_default, default, show_choices, type
+    )
 
     if confirmation_prompt:
         if confirmation_prompt is True:

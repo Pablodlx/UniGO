@@ -1,226 +1,387 @@
 "use client";
 
+import { useState, useEffect } from "react";
+import DesktopLayout from "@/components/DesktopLayout";
+import { getToken, Ride } from "@/lib/api";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import RideCard from "@/components/RideCard";
+import RideDetail from "@/components/RideDetail";
 
-const BASE = process.env.NEXT_PUBLIC_API_BASE;
+const BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000/api";
 
-// Helpers mínimos (si ya los tienes en src/lib/api.ts, puedes importarlos desde allí)
-function getToken() {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("token");
-}
-function clearToken() {
-  if (typeof window === "undefined") return;
-  localStorage.removeItem("token");
-}
-async function getProfile() {
-  const t = getToken();
-  if (!t) throw new Error("UNAUTHORIZED");
-  const r = await fetch(`${BASE}/me/profile`, {
-    headers: { Authorization: `Bearer ${t}` },
-    cache: "no-store",
-  });
-  if (!r.ok) throw new Error(String(r.status));
-  return r.json();
-}
-function isProfileComplete(p: any): boolean {
-  return Boolean(
-    p &&
-      p.full_name &&
-      p.university &&
-      p.degree &&
-      typeof p.course === "number" &&
-      p.course >= 1 &&
-      p.ride_intent
-  );
-}
+type ViewState = 'search' | 'results' | 'detail';
 
 export default function Home() {
-  const [loggedIn, setLoggedIn] = useState(false);
-  const [checking, setChecking] = useState(true);
-  const [profileComplete, setProfileComplete] = useState<boolean | null>(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentView, setCurrentView] = useState<ViewState>('search');
+  const [searchResults, setSearchResults] = useState<Ride[]>([]);
+  const [selectedRide, setSelectedRide] = useState<Ride | null>(null);
+  const [searchParams, setSearchParams] = useState<{from: string, to: string, date: string} | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const [bookingSuccess, setBookingSuccess] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
-    const t = getToken();
-    if (!t) {
-      setLoggedIn(false);
-      setChecking(false);
-      return;
+    // Check if user is logged in
+    const token = getToken();
+    setIsLoggedIn(!!token);
+    
+    // Fetch current user ID if logged in
+    if (token) {
+      fetchCurrentUserId();
     }
-    setLoggedIn(true);
-    (async () => {
-      try {
-        const p = await getProfile();
-        setProfileComplete(isProfileComplete(p));
-      } catch {
-        // si el token es inválido, lo tratamos como no logueado
-        setLoggedIn(false);
-        clearToken();
-      } finally {
-        setChecking(false);
-      }
-    })();
   }, []);
 
+  const fetchCurrentUserId = async () => {
+    try {
+      // Decode JWT token to get user ID
+      const token = getToken();
+      if (token) {
+        const base64Url = token.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+        
+        const decoded = JSON.parse(jsonPayload);
+        console.log("Decoded JWT:", decoded);
+        const userId = parseInt(decoded.sub);
+        console.log("Setting current user ID:", userId);
+        setCurrentUserId(userId);
+      }
+    } catch (error) {
+      console.error("Error fetching user ID:", error);
+    }
+  };
+
+  const handleSearch = async (searchData: any) => {
+    console.log("Search data:", searchData);
+    
+    try {
+      // Build query parameters
+      const params = new URLSearchParams();
+      if (searchData.from) params.append('departure_city', searchData.from);
+      if (searchData.to) params.append('destination_city', searchData.to);
+      if (searchData.date) {
+        // Date is already in YYYY-MM-DD format from the date input
+        params.append('departure_date', searchData.date as string);
+      }
+
+      const token = getToken();
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const response = await fetch(`${BASE}/rides/search?${params.toString()}`, {
+        headers,
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Search failed: ${response.status}`);
+      }
+
+      const rides = await response.json();
+      console.log("Search results:", rides);
+      
+      // Update state with results - filter out current user's rides
+      console.log("Current user ID:", currentUserId);
+      console.log("Search results before filtering:", rides);
+      
+      const filteredRides = currentUserId 
+        ? rides.filter(ride => {
+            const shouldShow = ride.driver_id !== currentUserId;
+            console.log(`Ride ${ride.id}: driver_id=${ride.driver_id}, shouldShow=${shouldShow}`);
+            return shouldShow;
+          })
+        : rides;
+      
+      console.log("Search results after filtering:", filteredRides);
+      setSearchResults(filteredRides);
+      setSearchParams(searchData);
+      
+    } catch (error) {
+      console.error("Search error:", error);
+      if (error.message.includes("Failed to fetch")) {
+        alert("Cannot connect to the server. Please make sure the backend is running.\n\nRun: make backend");
+      } else {
+        alert(`Error searching rides: ${error.message}`);
+      }
+    }
+  };
+
+  const handleRideClick = (ride: Ride) => {
+    setSelectedRide(ride);
+    setCurrentView('detail');
+  };
+
+  const handleBackToResults = () => {
+    setCurrentView('search');
+    setSelectedRide(null);
+  };
+
+  const handleContact = async () => {
+    if (!selectedRide) return;
+    
+    const token = getToken();
+    if (!token) {
+      alert("You must be logged in to make a reservation. Please login first.");
+      router.push("/login");
+      return;
+    }
+
+    try {
+      console.log("Booking ride:", selectedRide.id);
+      const response = await fetch(`${BASE}/rides/${selectedRide.id}/book?seats=1`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        // Show success message
+        setBookingSuccess(true);
+        // Update available seats locally
+        const updatedRide = { ...selectedRide, available_seats: selectedRide.available_seats - 1 };
+        setSelectedRide(updatedRide);
+        // Also update in search results if it's there
+        setSearchResults(prevResults => 
+          prevResults.map(ride => 
+            ride.id === selectedRide.id 
+              ? { ...ride, available_seats: ride.available_seats - 1 }
+              : ride
+          )
+        );
+      } else {
+        const errorText = await response.text();
+        throw new Error(errorText || `Booking failed: ${response.status}`);
+      }
+    } catch (error: any) {
+      console.error("Booking error:", error);
+      alert("❌ Failed to make booking. Please try again later.");
+    }
+  };
+
+  const handleReturnHome = () => {
+    setBookingSuccess(false);
+    setCurrentView('search');
+    setSelectedRide(null);
+    router.push("/");
+  };
+
+  const handleProfileClick = () => {
+    if (isLoggedIn) {
+      router.push("/profile");
+    } else {
+      router.push("/login");
+    }
+  };
+
+  // Show detail view
+  if (currentView === 'detail' && selectedRide) {
+    return (
+      <RideDetail 
+        ride={selectedRide} 
+        onBack={handleBackToResults}
+        onContact={handleContact}
+        bookingSuccess={bookingSuccess}
+        onReturnHome={handleReturnHome}
+      />
+    );
+  }
+
+  // Show search view
   return (
-    <main
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        height: "100vh",
-        fontFamily: "Arial, sans-serif",
-        backgroundColor: "#f4f6f9",
-      }}
-    >
-      <h1 style={{ fontSize: "2.5rem", marginBottom: "1rem", color: "#333" }}>
-        Bienvenido a <span style={{ color: "#0070f3" }}>UniGO</span>
-      </h1>
-      <p style={{ fontSize: "1.2rem", marginBottom: "2rem", color: "#666" }}>
-        Gestiona tu cuenta universitaria de manera rápida y segura.
-      </p>
+    <DesktopLayout showSidebar={false}>
+      {/* Main Content with Orange Gradient */}
+      <div className="min-h-screen bg-gradient-to-b from-orange-400 via-orange-500 to-orange-600">
+        {/* Header Navigation */}
+        <div className="bg-white px-8 py-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            {/* Logo */}
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-orange-500 rounded-lg flex items-center justify-center shadow-md">
+                <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"/>
+                  <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1V8a1 1 0 00-1-1h-3z"/>
+                </svg>
+              </div>
+              <span className="text-2xl font-bold text-gray-800">UniGO</span>
+            </div>
 
-      {/* Banner si el perfil está incompleto */}
-      {loggedIn && !checking && profileComplete === false && (
-        <div
-          style={{
-            marginBottom: "1.25rem",
-            padding: "0.75rem 1rem",
-            borderRadius: 8,
-            border: "1px solid #FACC15",
-            background: "#FEF3C7",
-            color: "#92400E",
-            fontSize: 14,
-            maxWidth: 560,
-            textAlign: "center",
-          }}
-        >
-          <b>Completa tu perfil</b> para poder publicar o solicitar viajes
-          (nombre, universidad, carrera, curso y preferencia).
+            {/* Navigation Links */}
+            <div className="flex items-center space-x-8">
+              <button className="flex items-center space-x-2 text-gray-700 hover:text-orange-600 transition-colors font-medium">
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.707.707a1 1 0 001.414-1.414l-7-7z"/>
+                </svg>
+                <span>Inicio</span>
+              </button>
+                <Link href="/my-rides" className="flex items-center space-x-2 text-gray-600 hover:text-orange-600 transition-colors font-medium">
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd"/>
+                  </svg>
+                  <span>Mis Viajes</span>
+                </Link>
+              <button 
+                onClick={handleProfileClick}
+                className="flex items-center space-x-2 text-gray-600 hover:text-orange-600 transition-colors font-medium cursor-pointer"
+              >
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd"/>
+                </svg>
+                <span>Perfil</span>
+              </button>
+              <Link href="/post-ride" className="bg-orange-500 text-white px-6 py-2 rounded-lg font-medium hover:bg-orange-600 transition-colors flex items-center space-x-2 shadow-md">
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd"/>
+                </svg>
+                <span>Publicar Viaje</span>
+              </Link>
+            </div>
+          </div>
         </div>
-      )}
 
-      <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
-        {!loggedIn && (
-          <>
-            <Link href="/register">
+        {/* Main Content */}
+        <div className="flex flex-col items-center justify-center px-8 py-16">
+          {/* Verified Students Badge */}
+          <div className="bg-white border border-orange-200 rounded-full px-8 py-3 mb-12 shadow-lg">
+            <div className="flex items-center space-x-3">
+              <svg className="w-6 h-6 text-orange-500" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/>
+              </svg>
+              <span className="text-gray-700 font-semibold text-lg">Solo Estudiantes Verificados</span>
+            </div>
+          </div>
+
+          {/* Main Headline */}
+          {searchResults.length === 0 && (
+            <div className="text-center mb-16">
+              <h1 className="text-7xl font-bold text-white mb-6 leading-tight tracking-tight">
+                Comparte Viajes,<br />
+                Ahorra Dinero,<br />
+                Haz Amigos
+              </h1>
+              <p className="text-2xl text-white/95 max-w-3xl mx-auto leading-relaxed">
+                UniGO: La plataforma de viajes compartidos para estudiantes universitarios, garantizando un viaje seguro con reservas aprobadas por el conductor.
+              </p>
+            </div>
+          )}
+
+        {/* Search Form */}
+          <div className={`bg-white rounded-3xl p-8 shadow-2xl w-full max-w-5xl border border-gray-100 ${searchResults.length > 0 ? 'mb-8' : ''}`}>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const formData = new FormData(e.target as HTMLFormElement);
+              const searchData = {
+                from: formData.get('from'),
+                to: formData.get('to'),
+                date: formData.get('date')
+              };
+              handleSearch(searchData);
+            }} className="flex items-center space-x-6">
+              {/* From Field */}
+              <div className="flex-1">
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <svg className="w-6 h-6 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd"/>
+                    </svg>
+                  </div>
+                  <input
+                    type="text"
+                    name="from"
+                    placeholder="Desde"
+                    className="w-full pl-12 pr-4 py-5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-lg font-medium placeholder-gray-400"
+                  />
+                </div>
+              </div>
+
+              {/* To Field */}
+              <div className="flex-1">
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <svg className="w-6 h-6 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd"/>
+                    </svg>
+                  </div>
+                  <input
+                    type="text"
+                    name="to"
+                    placeholder="Hasta"
+                    className="w-full pl-12 pr-4 py-5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-lg font-medium placeholder-gray-400"
+                  />
+                </div>
+              </div>
+
+              {/* Date Field */}
+              <div className="flex-1">
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <svg className="w-6 h-6 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd"/>
+                    </svg>
+                  </div>
+                  <input
+                    type="date"
+                    name="date"
+                    className="w-full pl-12 pr-4 py-5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-lg font-medium placeholder-gray-400"
+                  />
+                </div>
+              </div>
+
+              {/* Search Button */}
               <button
-                style={{
-                  padding: "0.8rem 1.5rem",
-                  fontSize: "1rem",
-                  fontWeight: "bold",
-                  backgroundColor: "#0070f3",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "8px",
-                  cursor: "pointer",
-                }}
+                type="submit"
+                className="bg-orange-500 text-white px-10 py-5 rounded-xl font-semibold hover:bg-orange-600 transition-colors flex items-center space-x-3 shadow-lg text-lg"
               >
-                Registro
+                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd"/>
+                </svg>
+                <span>Buscar</span>
               </button>
-            </Link>
-            <Link href="/login">
-              <button
-                style={{
-                  padding: "0.8rem 1.5rem",
-                  fontSize: "1rem",
-                  fontWeight: "bold",
-                  backgroundColor: "#10b981",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "8px",
-                  cursor: "pointer",
-                }}
-              >
-                Login
-              </button>
-            </Link>
-          </>
-        )}
+            </form>
+          </div>
 
-        {loggedIn && (
-          <>
-            {/* Mientras comprobamos el perfil */}
-            {checking && (
-              <button
-                disabled
-                style={{
-                  padding: "0.8rem 1.5rem",
-                  fontSize: "1rem",
-                  fontWeight: "bold",
-                  backgroundColor: "#9CA3AF",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "8px",
-                }}
-              >
-                Comprobando perfil…
-              </button>
-            )}
+          {/* Search Results Section */}
+          {searchParams && (
+            <div className="w-full max-w-6xl mt-12">
+              <div className="mb-8">
+                <h2 className="text-3xl font-bold text-white mb-4">Resultados de Búsqueda</h2>
+                <p className="text-white/90 text-lg">
+                  {searchParams.from} → {searchParams.to} {searchParams.date && `• ${searchParams.date}`}
+                </p>
+              </div>
 
-            {/* Acciones según estado del perfil */}
-            {!checking && profileComplete === false && (
-              <Link href="/profile?setup=1">
-                <button
-                  style={{
-                    padding: "0.8rem 1.5rem",
-                    fontSize: "1rem",
-                    fontWeight: "bold",
-                    backgroundColor: "#F59E0B",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "8px",
-                    cursor: "pointer",
-                  }}
-                >
-                  Completar perfil
-                </button>
-              </Link>
-            )}
-
-            {!checking && profileComplete === true && (
-              <Link href="/profile">
-                <button
-                  style={{
-                    padding: "0.8rem 1.5rem",
-                    fontSize: "1rem",
-                    fontWeight: "bold",
-                    backgroundColor: "#2563EB",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "8px",
-                    cursor: "pointer",
-                  }}
-                >
-                  Editar perfil
-                </button>
-              </Link>
-            )}
-
-            {/* Logout opcional */}
-            <button
-              onClick={() => {
-                clearToken();
-                window.location.reload();
-              }}
-              style={{
-                padding: "0.8rem 1.5rem",
-                fontSize: "1rem",
-                fontWeight: "bold",
-                backgroundColor: "#EF4444",
-                color: "white",
-                border: "none",
-                borderRadius: "8px",
-                cursor: "pointer",
-              }}
-            >
-              Logout
-            </button>
-          </>
-        )}
+              {/* Show Results or No Results Message */}
+              {searchResults.length > 0 ? (
+                <div className="space-y-4">
+                  {searchResults.map((ride) => (
+                    <RideCard 
+                      key={ride.id} 
+                      ride={ride} 
+                      onClick={() => handleRideClick(ride)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="bg-white rounded-xl shadow-md p-8 text-center">
+                  <div className="flex flex-col items-center justify-center py-8">
+                    <svg className="w-16 h-16 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <h3 className="text-2xl font-bold text-gray-800 mb-2">No se encontraron viajes</h3>
+                    <p className="text-gray-600">
+                      Intenta ajustar tus criterios de búsqueda o vuelve más tarde para ver más viajes
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
-    </main>
+    </DesktopLayout>
   );
 }

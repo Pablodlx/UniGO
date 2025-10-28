@@ -133,7 +133,9 @@ class _WindowsConsoleReader(_WindowsConsoleRawIOBase):
         if not bytes_to_be_read:
             return 0
         elif bytes_to_be_read % 2:
-            raise ValueError("cannot read odd number of bytes from UTF-16-LE encoded console")
+            raise ValueError(
+                "cannot read odd number of bytes from UTF-16-LE encoded console"
+            )
 
         buffer = get_buffer(b, writable=True)
         code_units_to_be_read = bytes_to_be_read // 2

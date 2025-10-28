@@ -64,7 +64,9 @@ async def run_sync(  # type: ignore[return]
             response = await buffered.receive_until(b"\n", 50)
             status, length = response.split(b" ")
             if status not in (b"RETURN", b"EXCEPTION"):
-                raise RuntimeError(f"Worker process returned unexpected response: {response!r}")
+                raise RuntimeError(
+                    f"Worker process returned unexpected response: {response!r}"
+                )
 
             pickled_response = await buffered.receive_exactly(int(length))
         except BaseException as exc:
@@ -111,7 +113,9 @@ async def run_sync(  # type: ignore[return]
             process, idle_since = idle_workers.pop()
             if process.returncode is None:
                 stdin = cast(ByteSendStream, process.stdin)
-                buffered = BufferedByteReceiveStream(cast(ByteReceiveStream, process.stdout))
+                buffered = BufferedByteReceiveStream(
+                    cast(ByteReceiveStream, process.stdout)
+                )
 
                 # Prune any other workers that have been idle for WORKER_MAX_IDLE_TIME
                 # seconds or longer
@@ -135,10 +139,14 @@ async def run_sync(  # type: ignore[return]
             workers.remove(process)
         else:
             command = [sys.executable, "-u", "-m", __name__]
-            process = await open_process(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+            process = await open_process(
+                command, stdin=subprocess.PIPE, stdout=subprocess.PIPE
+            )
             try:
                 stdin = cast(ByteSendStream, process.stdin)
-                buffered = BufferedByteReceiveStream(cast(ByteReceiveStream, process.stdout))
+                buffered = BufferedByteReceiveStream(
+                    cast(ByteReceiveStream, process.stdout)
+                )
                 with fail_after(20):
                     message = await buffered.receive(6)
 
@@ -157,7 +165,9 @@ async def run_sync(  # type: ignore[return]
                 raise
             except BaseException as exc:
                 process.kill()
-                raise BrokenWorkerProcess("Error during worker process initialization") from exc
+                raise BrokenWorkerProcess(
+                    "Error during worker process initialization"
+                ) from exc
 
             workers.add(process)
 

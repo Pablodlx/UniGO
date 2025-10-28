@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     # Así Pydantic no intenta json.loads() antes del validador.
     allowed_email_domains: list[str] | str = []
     email_code_expire_minutes: int = 15
+    
+    # --- Development settings ---
+    auto_verify_users: bool = False  # Set to True to automatically verify users in development
 
     # --- Mail (MailHog en dev) ---
     mail_username: str | None = ""

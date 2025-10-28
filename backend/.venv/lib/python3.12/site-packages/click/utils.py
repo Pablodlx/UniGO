@@ -392,7 +392,9 @@ def open_file(
     .. versionadded:: 3.0
     """
     if lazy:
-        return t.cast("t.IO[t.Any]", LazyFile(filename, mode, encoding, errors, atomic=atomic))
+        return t.cast(
+            "t.IO[t.Any]", LazyFile(filename, mode, encoding, errors, atomic=atomic)
+        )
 
     f, should_close = open_stream(filename, mode, encoding, errors, atomic=atomic)
 
@@ -437,7 +439,9 @@ def format_filename(
     if isinstance(filename, bytes):
         filename = filename.decode(sys.getfilesystemencoding(), "replace")
     else:
-        filename = filename.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+        filename = filename.encode("utf-8", "surrogateescape").decode(
+            "utf-8", "replace"
+        )
 
     return filename
 
@@ -482,7 +486,9 @@ def get_app_dir(app_name: str, roaming: bool = True, force_posix: bool = False) 
     if force_posix:
         return os.path.join(os.path.expanduser(f"~/.{_posixify(app_name)}"))
     if sys.platform == "darwin":
-        return os.path.join(os.path.expanduser("~/Library/Application Support"), app_name)
+        return os.path.join(
+            os.path.expanduser("~/Library/Application Support"), app_name
+        )
     return os.path.join(
         os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
         _posixify(app_name),
@@ -514,7 +520,9 @@ class PacifyFlushWrapper:
         return getattr(self.wrapped, attr)
 
 
-def _detect_program_name(path: str | None = None, _main: ModuleType | None = None) -> str:
+def _detect_program_name(
+    path: str | None = None, _main: ModuleType | None = None
+) -> str:
     """Determine the command used to run the program, for use in help
     text. If a file or entry point was executed, the file name is
     returned. If ``python -m`` was used to execute a module or package,

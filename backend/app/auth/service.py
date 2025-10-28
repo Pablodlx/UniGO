@@ -56,6 +56,12 @@ def register(db: Session, data: UserCreate) -> str:
 
     try:
         user = User(email=data.email, password_hash=hash_password(data.password))
+        
+        # Auto-verify users if enabled in development mode
+        if settings.auto_verify_users:
+            user.is_verified = True
+            print(f"[UniGo] Auto-verified user {data.email} (development mode)")
+        
         db.add(user)
         db.commit()
         db.refresh(user)
@@ -115,3 +121,15 @@ def login(db: Session, email: str, password: str) -> str:
     if not user.is_verified:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Email no verificado")
     return create_access_token(sub=str(user.id))
+
+
+def verify_user_manually(db: Session, email: str) -> None:
+    """
+    Manually verify a user by email (useful for development/testing).
+    """
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    user.is_verified = True
+    db.commit()
