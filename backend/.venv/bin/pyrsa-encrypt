@@ -1,4 +1,4 @@
-#!/home/alberto/UniGO/backend/.venv/bin/python3
+#!/home/pablodlx/UniGO/backend/.venv/bin/python3
 import sys
 from rsa.cli import encrypt
 if __name__ == '__main__':
