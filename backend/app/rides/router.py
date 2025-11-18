@@ -19,7 +19,13 @@ def create_ride(
     current_user: User = Depends(get_current_user),
 ):
     """Create a new ride"""
-    return service.create_ride(db, ride_data, current_user.id)
+    try:
+        return service.create_ride(db, ride_data, current_user.id)
+    except Exception as e:
+        import traceback
+        print(f"Error creating ride: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Error creating ride: {str(e)}")
 
 
 @router.get("/search", response_model=List[RideOut])
@@ -74,39 +80,320 @@ def get_my_bookings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get all bookings made by the current user"""
+    """Get all bookings made by the current user (excluding rides in registro - past or cancelled)"""
     from sqlalchemy import and_
+    from datetime import datetime, timezone
+    from app.rides.service import get_ride_check_datetime
     
-    # Get all bookings for this user
-    bookings = db.query(Booking).filter(
+    try:
+        # Get all bookings for this user
+        bookings = db.query(Booking).filter(
+            and_(
+                Booking.passenger_id == current_user.id,
+                Booking.status != "canceled"
+            )
+        ).all()
+        
+        now = datetime.now(timezone.utc)
+        # Get ride details for each booking
+        result = []
+        for booking in bookings:
+            try:
+                ride = db.query(Ride).filter(Ride.id == booking.ride_id).first()
+                if not ride:
+                    continue
+                
+                # Get the datetime to check if ride has passed (arrival time if available, else departure)
+                check_datetime = get_ride_check_datetime(ride)
+                
+                # Exclude rides that are in registro (past or cancelled)
+                # Only include active rides that haven't passed yet (based on arrival time)
+                if check_datetime >= now and ride.is_active:
+                    driver = db.query(User).filter(User.id == ride.driver_id).first()
+                    if not driver:
+                        continue
+                    
+                    # Get driver's average rating (gracefully handle if ratings table doesn't exist)
+                    driver_average_rating = None
+                    try:
+                        from app.ratings import service as ratings_service
+                        driver_average_rating = ratings_service.get_user_average_rating(db, driver.id)
+                    except Exception as e:
+                        # If ratings service fails, just continue without rating
+                        print(f"Warning: Could not get rating for driver {driver.id}: {e}")
+                        driver_average_rating = None
+                    
+                    from app.rides.service import calculate_arrival_time_string
+                    arrival_time = calculate_arrival_time_string(ride)
+                    
+                    result.append(RideOut(
+                        id=ride.id,
+                        driver_id=ride.driver_id,
+                        driver_name=driver.full_name or driver.email,
+                        driver_university=driver.university,
+                        departure_city=ride.departure_city,
+                        destination_city=ride.destination_city,
+                        departure_date=ride.departure_date,
+                        departure_time=ride.departure_time,
+                        available_seats=ride.available_seats,
+                        price_per_seat=ride.price_per_seat,
+                        vehicle_info=ride.vehicle_info,
+                        additional_details=ride.additional_details,
+                        estimated_duration_minutes=ride.estimated_duration_minutes,
+                        arrival_time=arrival_time,
+                        is_active=ride.is_active,
+                        created_at=ride.created_at,
+                        driver_average_rating=driver_average_rating,
+                    ))
+            except Exception as e:
+                print(f"Error processing booking {booking.id}: {e}")
+                import traceback
+                traceback.print_exc()
+                # Continue with next booking if this one fails
+                continue
+        
+        return result
+    except Exception as e:
+        print(f"Error in get_my_bookings: {e}")
+        import traceback
+        traceback.print_exc()
+        # Return empty list instead of crashing
+        return []
+
+
+@router.get("/registro", response_model=List[dict])
+def get_ride_history(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get ride history (past rides) with role indicator (conductor/pasajero)"""
+    from datetime import datetime, timezone, timedelta
+    from sqlalchemy import and_
+    from app.auth.models import Rating
+    from app.rides.service import get_ride_check_datetime, calculate_arrival_datetime, calculate_arrival_time_string
+    
+    now = datetime.now(timezone.utc)
+    
+    # Get all rides where user was driver
+    all_driver_rides = db.query(Ride).filter(
+        Ride.driver_id == current_user.id
+    ).all()
+    
+    # Get all bookings where user was passenger
+    all_bookings = db.query(Booking).filter(
         and_(
             Booking.passenger_id == current_user.id,
-            Booking.status != "canceled"
+            Booking.status != BookingStatus.canceled
         )
     ).all()
     
-    # Get ride details for each booking
     result = []
-    for booking in bookings:
+    
+    # Filter driver rides: include past rides OR canceled rides
+    # Group by ride_id to show one entry per ride with all passengers
+    driver_rides_map = {}  # ride_id -> ride entry
+    
+    for ride in all_driver_rides:
+        # Get the datetime to check if ride has passed (arrival time if available, else departure)
+        check_datetime = get_ride_check_datetime(ride)
+        
+        # Calculate arrival time string for display
+        arrival_time = calculate_arrival_time_string(ride)
+        
+        # Calculate arrival datetime for rating window calculations
+        arrival_datetime = calculate_arrival_datetime(ride)
+        
+        # Include if the ride has passed (based on arrival time) OR if it's canceled
+        if check_datetime < now or not ride.is_active:
+            driver = db.query(User).filter(User.id == ride.driver_id).first()
+            # Determine status: cancelled if not active, completed if past and active
+            status = "cancelled" if not ride.is_active else "completed"
+            
+            # For driver: find all bookings to rate passengers
+            # Get all confirmed bookings for this ride (driver can rate each passenger)
+            bookings = db.query(Booking).filter(
+                and_(
+                    Booking.ride_id == ride.id,
+                    Booking.status == BookingStatus.confirmed
+                )
+            ).all()
+            
+            # Build passengers array for this ride
+            passengers = []
+            has_pending_ratings = False
+            
+            if bookings:
+                for booking in bookings:
+                    has_rated = False
+                    can_rate = False
+                    
+                    if status == "completed":
+                        # Check if rating is within 7 days from arrival time
+                        rating_reference_time = arrival_datetime if arrival_datetime else check_datetime
+                        days_since_ride = (now - rating_reference_time).days
+                        within_rating_window = days_since_ride <= 7
+                        
+                        if within_rating_window:
+                            # Driver can rate passengers - check if they've rated this booking
+                            try:
+                                has_rated = db.query(Rating).filter(
+                                    and_(
+                                        Rating.booking_id == booking.id,
+                                        Rating.rater_id == current_user.id
+                                    )
+                                ).first() is not None
+                                can_rate = not has_rated
+                            except Exception:
+                                has_rated = False
+                                can_rate = False
+                        else:
+                            has_rated = False
+                            can_rate = False
+                    else:
+                        has_rated = False
+                        can_rate = False
+                    
+                    # Get passenger info for this booking (driver rates passenger)
+                    passenger = db.query(User).filter(User.id == booking.passenger_id).first()
+                    if not passenger:
+                        continue  # Skip if passenger not found
+                    
+                    passenger_name = passenger.full_name or passenger.email
+                    
+                    if can_rate:
+                        has_pending_ratings = True
+                    
+                    passengers.append({
+                        "booking_id": booking.id,
+                        "passenger_id": booking.passenger_id,
+                        "passenger_name": passenger_name,
+                        "passenger_avatar": passenger.avatar_url,
+                        "has_rated": has_rated,
+                        "can_rate": can_rate,
+                    })
+            
+            # Create ride entry (one per ride, not per booking)
+            driver_rides_map[ride.id] = {
+                "id": ride.id,
+                "driver_id": ride.driver_id,
+                "driver_name": driver.full_name or driver.email,
+                "driver_university": driver.university,
+                "departure_city": ride.departure_city,
+                "destination_city": ride.destination_city,
+                "departure_date": ride.departure_date,
+                "departure_time": ride.departure_time,
+                "arrival_time": arrival_time,
+                "available_seats": ride.available_seats,
+                "price_per_seat": ride.price_per_seat,
+                "vehicle_info": ride.vehicle_info,
+                "additional_details": ride.additional_details,
+                "estimated_duration_minutes": ride.estimated_duration_minutes,
+                "is_active": ride.is_active,
+                "created_at": ride.created_at,
+                "role": "conductor",
+                "status": status,
+                "passengers": passengers,
+                "has_pending_ratings": has_pending_ratings,
+                # Keep old fields for backward compatibility with passenger rides
+                "booking_id": None,
+                "has_rated": False,
+                "can_rate": False,
+            }
+    
+    # Add all driver rides to result
+    result.extend(driver_rides_map.values())
+    
+    # Filter passenger bookings: include past rides OR canceled rides
+    for booking in all_bookings:
         ride = db.query(Ride).filter(Ride.id == booking.ride_id).first()
         if ride:
-            driver = db.query(User).filter(User.id == ride.driver_id).first()
-            result.append(RideOut(
-                id=ride.id,
-                driver_id=ride.driver_id,
-                driver_name=driver.full_name or driver.email,
-                driver_university=driver.university,
-                departure_city=ride.departure_city,
-                destination_city=ride.destination_city,
-                departure_date=ride.departure_date,
-                departure_time=ride.departure_time,
-                available_seats=ride.available_seats,
-                price_per_seat=ride.price_per_seat,
-                vehicle_info=ride.vehicle_info,
-                additional_details=ride.additional_details,
-                is_active=ride.is_active,
-                created_at=ride.created_at,
-            ))
+            # Get the datetime to check if ride has passed (arrival time if available, else departure)
+            check_datetime = get_ride_check_datetime(ride)
+            
+            # Calculate arrival time string for display
+            arrival_time = calculate_arrival_time_string(ride)
+            
+            # Calculate arrival datetime for rating window calculations
+            arrival_datetime = calculate_arrival_datetime(ride)
+            
+            # Include if the ride has passed (based on arrival time) OR if it's canceled
+            if check_datetime < now or not ride.is_active:
+                driver = db.query(User).filter(User.id == ride.driver_id).first()
+                # Determine status: cancelled if not active, completed if past and active
+                status = "cancelled" if not ride.is_active else "completed"
+                
+                # For passenger: check if they've rated the driver
+                has_rated = False
+                can_rate = False
+                
+                if status == "completed":
+                    # Check if rating is within 7 days from arrival time
+                    # Use arrival time if available, otherwise use departure time
+                    rating_reference_time = arrival_datetime if arrival_datetime else check_datetime
+                    days_since_ride = (now - rating_reference_time).days
+                    within_rating_window = days_since_ride <= 7
+                    
+                    if within_rating_window:
+                        try:
+                            has_rated = db.query(Rating).filter(
+                                and_(
+                                    Rating.booking_id == booking.id,
+                                    Rating.rater_id == current_user.id
+                                )
+                            ).first() is not None
+                            can_rate = not has_rated
+                        except Exception:
+                            # If ratings table doesn't exist, default to False
+                            has_rated = False
+                            can_rate = False
+                    else:
+                        # Outside 7-day window
+                        has_rated = False
+                        can_rate = False
+                else:
+                    # Ride not completed (cancelled)
+                    has_rated = False
+                    can_rate = False
+                
+                # Include driver profile info for rating modal (passenger rates driver)
+                # This is the person BEING RATED by the passenger
+                if not driver:
+                    continue  # Skip if driver not found
+                
+                driver_name = driver.full_name or driver.email
+                rated_user_info = {
+                    "rated_user_id": ride.driver_id,
+                    "rated_user_name": driver_name,
+                    "rated_user_avatar": driver.avatar_url,
+                }
+                
+                result.append({
+                    "id": ride.id,
+                    "driver_id": ride.driver_id,
+                    "driver_name": driver.full_name or driver.email,
+                    "driver_university": driver.university,
+                    "departure_city": ride.departure_city,
+                    "destination_city": ride.destination_city,
+                    "departure_date": ride.departure_date,
+                    "departure_time": ride.departure_time,
+                    "arrival_time": arrival_time,
+                    "available_seats": ride.available_seats,
+                    "price_per_seat": ride.price_per_seat,
+                    "vehicle_info": ride.vehicle_info,
+                    "additional_details": ride.additional_details,
+                    "estimated_duration_minutes": ride.estimated_duration_minutes,
+                    "is_active": ride.is_active,
+                    "created_at": ride.created_at,
+                    "role": "pasajero",
+                    "status": status,
+                    "booking_id": booking.id,
+                    "has_rated": has_rated,
+                    "can_rate": can_rate,
+                    **rated_user_info
+                })
+    
+    # Sort by departure date (most recent first)
+    result.sort(key=lambda x: (x["departure_date"], x["departure_time"]), reverse=True)
     
     return result
 
@@ -166,3 +453,63 @@ def book_ride(
         db.rollback()
         print(f"Error creating booking: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to create booking: {str(e)}")
+
+
+@router.post("/{ride_id}/cancel")
+def cancel_ride(
+    ride_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Cancel a ride (driver can cancel their own ride)"""
+    ride = db.query(Ride).filter(Ride.id == ride_id).first()
+    if not ride:
+        raise HTTPException(status_code=404, detail="Ride not found")
+    
+    # Check if user is the driver
+    if ride.driver_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only cancel your own rides")
+    
+    # Cancel the ride
+    ride.is_active = False
+    db.commit()
+    
+    return {"message": "Ride canceled successfully", "ride_id": ride_id}
+
+
+@router.post("/{ride_id}/cancel-booking")
+def cancel_booking(
+    ride_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Cancel a booking (passenger can cancel their reservation)"""
+    # Find the booking
+    booking = db.query(Booking).filter(
+        Booking.ride_id == ride_id,
+        Booking.passenger_id == current_user.id,
+        Booking.status != BookingStatus.canceled
+    ).first()
+    
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    
+    # Get the ride to restore seats
+    ride = db.query(Ride).filter(Ride.id == ride_id).first()
+    if not ride:
+        raise HTTPException(status_code=404, detail="Ride not found")
+    
+    try:
+        # Cancel the booking
+        booking.status = BookingStatus.canceled
+        
+        # Restore available seats
+        ride.available_seats += booking.seats
+        
+        db.commit()
+        
+        return {"message": "Booking canceled successfully", "ride_id": ride_id, "available_seats": ride.available_seats}
+    except Exception as e:
+        db.rollback()
+        print(f"Error canceling booking: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to cancel booking: {str(e)}")

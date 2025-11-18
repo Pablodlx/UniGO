@@ -162,14 +162,17 @@ export interface Ride {
   driver_id: number;
   driver_name: string;
   driver_university?: string;
+  driver_average_rating?: number;
   departure_city: string;
   destination_city: string;
   departure_date: string;
   departure_time: string;
+  arrival_time?: string; // "HH:MM" format, calculated from departure_time + duration
   available_seats: number;
   price_per_seat: number;
   vehicle_info?: string;
   additional_details?: string;
+  estimated_duration_minutes?: number;
   is_active: boolean;
   created_at: string;
 }
@@ -200,5 +203,76 @@ export async function getMyRides(): Promise<Ride[]> {
 export async function getMyBookings(): Promise<Ride[]> {
   return fetchJson<Ride[]>(`${BASE}/rides/my-bookings`, {
     headers: { ...authHeaders() },
+  });
+}
+
+export async function cancelRide(ride_id: number): Promise<void> {
+  return fetchJson<void>(`${BASE}/rides/${ride_id}/cancel`, {
+    method: "POST",
+    headers: { ...authHeaders() },
+  });
+}
+
+export async function cancelBooking(ride_id: number): Promise<void> {
+  return fetchJson<void>(`${BASE}/rides/${ride_id}/cancel-booking`, {
+    method: "POST",
+    headers: { ...authHeaders() },
+  });
+}
+
+export interface Passenger {
+  booking_id: number;
+  passenger_id: number;
+  passenger_name: string;
+  passenger_avatar?: string | null;
+  has_rated: boolean;
+  can_rate: boolean;
+}
+
+export interface RideHistoryItem extends Ride {
+  role: "conductor" | "pasajero";
+  status?: "cancelled" | "completed";
+  booking_id?: number;
+  has_rated?: boolean;
+  can_rate?: boolean;
+  passenger_name?: string; // For drivers: name of the passenger they can rate (deprecated - use passengers array)
+  rated_user_id?: number; // ID of the user being rated
+  rated_user_name?: string; // Name of the user being rated
+  rated_user_avatar?: string | null; // Avatar URL of the user being rated
+  // For driver rides: array of passengers with rating status
+  passengers?: Passenger[];
+  has_pending_ratings?: boolean; // True if there are passengers pending to rate
+}
+
+export async function getRideHistory(): Promise<RideHistoryItem[]> {
+  return fetchJson<RideHistoryItem[]>(`${BASE}/rides/registro`, {
+    headers: { ...authHeaders() },
+  });
+}
+
+export interface CreateRatingRequest {
+  booking_id: number;
+  rating: number; // 1-5
+  comment?: string;
+}
+
+export interface RatingResponse {
+  id: number;
+  booking_id: number;
+  rater_id: number;
+  rated_id: number;
+  rating: number;
+  comment?: string;
+  created_at: string;
+}
+
+export async function createRating(data: CreateRatingRequest): Promise<RatingResponse> {
+  return fetchJson<RatingResponse>(`${BASE}/ratings/`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+    },
+    body: JSON.stringify(data),
   });
 }

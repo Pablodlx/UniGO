@@ -33,3 +33,20 @@ async def upload_avatar(
     current_user: User = Depends(get_current_user),
 ):
     return await service.upload_avatar(db, current_user, file)
+
+
+@router.get("/user/{user_id}/profile", response_model=ProfileOut)
+def get_user_profile_by_id(
+    user_id: int,
+    db: Session = Depends(get_db),
+):
+    """Get profile information for a specific user by ID"""
+    from app.auth.models import User
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        from fastapi import HTTPException, status
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    return service.get_profile(db, user)

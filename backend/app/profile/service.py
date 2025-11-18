@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.models import User
 from app.profile.schemas import ProfileOut, ProfileUpdate
+from app.ratings import service as ratings_service
 
 AVATAR_DIR = os.getenv("AVATAR_DIR", "data/avatars")
 PUBLIC_PREFIX = os.getenv("AVATAR_PUBLIC_PREFIX", "/static/avatars")
@@ -14,6 +15,14 @@ REQUIRED = ("full_name", "university", "degree", "course", "ride_intent")
 
 def get_profile(db: Session, user: User) -> ProfileOut:
     ride = user.ride_intent.name if hasattr(user.ride_intent, "name") else user.ride_intent
+    
+    # Calculate average rating and rating count
+    average_rating = ratings_service.get_user_average_rating(db, user.id)
+    rating_count = ratings_service.get_rating_count(db, user.id)
+    
+    # Set display text for average rating
+    average_rating_display = "No hay valoraciones" if average_rating is None else str(average_rating)
+    
     return ProfileOut(
         email=user.email,
         full_name=user.full_name,
@@ -22,6 +31,9 @@ def get_profile(db: Session, user: User) -> ProfileOut:
         course=user.course,
         ride_intent=ride,
         avatar_url=user.avatar_url,
+        average_rating=average_rating,
+        rating_count=rating_count,
+        average_rating_display=average_rating_display,
     )
 
 

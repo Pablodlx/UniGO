@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import DesktopLayout from "@/components/DesktopLayout";
 import Link from "next/link";
 import { getToken } from "@/lib/api";
+import AddressAutocomplete, { AddressValue } from "@/components/AddressAutocomplete";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000/api";
 
@@ -19,8 +20,6 @@ function getToken() {
 
 // --- validación ---
 const schema = z.object({
-  departure_city: z.string().min(1, "Ciudad de salida es obligatoria").max(100),
-  destination_city: z.string().min(1, "Ciudad de destino es obligatoria").max(100),
   departure_date: z.string().min(1, "Fecha de salida es obligatoria"),
   departure_time: z.string().min(1, "Hora de salida es obligatoria"),
   available_seats: z.number().int().min(1, "Mínimo 1 asiento").max(8, "Máximo 8 asientos"),
@@ -34,6 +33,10 @@ export default function PostRidePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [fromAddress, setFromAddress] = useState<AddressValue | null>(null);
+  const [toAddress, setToAddress] = useState<AddressValue | null>(null);
+  const [fromError, setFromError] = useState<string>("");
+  const [toError, setToError] = useState<string>("");
 
   const {
     register,
@@ -42,8 +45,6 @@ export default function PostRidePage() {
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
-      departure_city: "",
-      destination_city: "",
       departure_date: "",
       departure_time: "",
       available_seats: 1,
@@ -55,9 +56,47 @@ export default function PostRidePage() {
 
   const onSubmit = async (values: FormValues) => {
     setMsg(null);
+    setFromError("");
+    setToError("");
+    
+    // Validate addresses
+    if (!fromAddress || !fromAddress.placeId) {
+      setFromError("Selecciona una dirección de la lista.");
+      return;
+    }
+    
+    if (!toAddress || !toAddress.placeId) {
+      setToError("Selecciona una dirección de la lista.");
+      return;
+    }
+    
     setLoading(true);
     
-    console.log("Submitting ride data:", values);
+    // Prepare payload with address data
+    const payload = {
+      from: {
+        placeId: fromAddress.placeId,
+        formattedAddress: fromAddress.formattedAddress,
+        lat: fromAddress.lat,
+        lng: fromAddress.lng,
+      },
+      to: {
+        placeId: toAddress.placeId,
+        formattedAddress: toAddress.formattedAddress,
+        lat: toAddress.lat,
+        lng: toAddress.lng,
+      },
+      departure_city: fromAddress.formattedAddress, // Keep for backward compatibility
+      destination_city: toAddress.formattedAddress, // Keep for backward compatibility
+      departure_date: values.departure_date,
+      departure_time: values.departure_time,
+      available_seats: values.available_seats,
+      price_per_seat: values.price_per_seat,
+      vehicle_info: values.vehicle_info,
+      additional_details: values.additional_details,
+    };
+    
+    console.log("Submitting ride data:", payload);
     
     try {
       const token = getToken();
@@ -71,7 +110,7 @@ export default function PostRidePage() {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`,
         },
-        body: JSON.stringify(values),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -179,47 +218,41 @@ export default function PostRidePage() {
 
           {/* Form Card */}
           <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
+            <form onSubmit={handleSubmit(onSubmit)} autoComplete="off" className="space-y-8">
               {/* Two Column Fields */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {/* Departure City */}
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-3">
-                    <div className="flex items-center space-x-2">
-                      <svg className="w-4 h-4 text-red-500" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
-                      </svg>
-                      <span>Desde *</span>
-                    </div>
-                  </label>
-                  <input
-                    {...register("departure_city")}
-                    className="w-full px-4 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-lg font-medium"
+                  <AddressAutocomplete
+                    id="post-ride-from"
+                    label="Desde"
                     placeholder="Ej. Calle Gran Vía, 1"
+                    initialValue={fromAddress}
+                    onChange={(value) => {
+                      setFromAddress(value);
+                      setFromError("");
+                    }}
+                    required={true}
+                    error={fromError}
+                    className="w-full"
                   />
-                  {errors.departure_city && (
-                    <p className="text-red-500 text-sm mt-2">{errors.departure_city.message}</p>
-                  )}
                 </div>
 
                 {/* Destination City */}
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-3">
-                    <div className="flex items-center space-x-2">
-                      <svg className="w-4 h-4 text-red-500" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
-                      </svg>
-                      <span>Hasta *</span>
-                    </div>
-                  </label>
-                  <input
-                    {...register("destination_city")}
-                    className="w-full px-4 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-lg font-medium"
+                  <AddressAutocomplete
+                    id="post-ride-to"
+                    label="Hasta"
                     placeholder="Ej. Universidad CEU"
+                    initialValue={toAddress}
+                    onChange={(value) => {
+                      setToAddress(value);
+                      setToError("");
+                    }}
+                    required={true}
+                    error={toError}
+                    className="w-full"
                   />
-                  {errors.destination_city && (
-                    <p className="text-red-500 text-sm mt-2">{errors.destination_city.message}</p>
-                  )}
                 </div>
 
                 {/* Departure Date */}
@@ -366,7 +399,7 @@ export default function PostRidePage() {
                 <div
                   className={`p-4 rounded-xl border text-sm font-medium ${
                     msg.includes("✅")
-                      ? "bg-green-50 border-green-200 text-green-800"
+                      ? "bg-gray-50 border-green-200 text-green-800"
                       : "bg-red-50 border-red-200 text-red-800"
                   }`}
                 >

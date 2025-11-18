@@ -165,7 +165,7 @@ export default function LoginPage() {
               {msg && (
                 <div className={`rounded-xl p-4 ${
                   msg.includes("✅") 
-                    ? "bg-green-50 border border-green-200 text-green-800" 
+                    ? "bg-gray-50 border border-green-200 text-green-800" 
                     : "bg-red-50 border border-red-200 text-red-800"
                 }`}>
                   <p className="text-sm font-medium">{msg}</p>

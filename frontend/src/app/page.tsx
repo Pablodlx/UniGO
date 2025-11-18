@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import RideCard from "@/components/RideCard";
 import RideDetail from "@/components/RideDetail";
+import AddressAutocomplete, { AddressValue } from "@/components/AddressAutocomplete";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000/api";
 
@@ -17,9 +18,13 @@ export default function Home() {
   const [currentView, setCurrentView] = useState<ViewState>('search');
   const [searchResults, setSearchResults] = useState<Ride[]>([]);
   const [selectedRide, setSelectedRide] = useState<Ride | null>(null);
-  const [searchParams, setSearchParams] = useState<{from: string, to: string, date: string} | null>(null);
+  const [searchParams, setSearchParams] = useState<{from: AddressValue | null, to: AddressValue | null, date: string} | null>(null);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [bookingSuccess, setBookingSuccess] = useState(false);
+  const [fromAddress, setFromAddress] = useState<AddressValue | null>(null);
+  const [toAddress, setToAddress] = useState<AddressValue | null>(null);
+  const [fromError, setFromError] = useState<string>("");
+  const [toError, setToError] = useState<string>("");
   const router = useRouter();
 
   useEffect(() => {
@@ -55,17 +60,28 @@ export default function Home() {
     }
   };
 
-  const handleSearch = async (searchData: any) => {
-    console.log("Search data:", searchData);
+  const handleSearch = async (date: string) => {
+    // Clear any previous errors
+    setFromError("");
+    setToError("");
+    
+    // Allow empty addresses - only validate if an address is partially entered but not selected
+    // If user has typed something but not selected from dropdown, show error
+    // But allow completely empty fields
+    
+    console.log("Search data:", { from: fromAddress, to: toAddress, date });
     
     try {
-      // Build query parameters
+      // Build query parameters - use formatted address if available, otherwise empty string
       const params = new URLSearchParams();
-      if (searchData.from) params.append('departure_city', searchData.from);
-      if (searchData.to) params.append('destination_city', searchData.to);
-      if (searchData.date) {
-        // Date is already in YYYY-MM-DD format from the date input
-        params.append('departure_date', searchData.date as string);
+      if (fromAddress && fromAddress.formattedAddress) {
+        params.append('departure_city', fromAddress.formattedAddress);
+      }
+      if (toAddress && toAddress.formattedAddress) {
+        params.append('destination_city', toAddress.formattedAddress);
+      }
+      if (date) {
+        params.append('departure_date', date);
       }
 
       const token = getToken();
@@ -98,7 +114,7 @@ export default function Home() {
       
       console.log("Search results after filtering:", filteredRides);
       setSearchResults(filteredRides);
-      setSearchParams(searchData);
+      setSearchParams({ from: fromAddress, to: toAddress, date });
       
     } catch (error) {
       console.error("Search error:", error);
@@ -244,79 +260,51 @@ export default function Home() {
         </div>
 
         {/* Main Content */}
-        <div className="flex flex-col items-center justify-center px-8 py-16">
-          {/* Verified Students Badge */}
-          <div className="bg-white border border-orange-200 rounded-full px-8 py-3 mb-12 shadow-lg">
-            <div className="flex items-center space-x-3">
-              <svg className="w-6 h-6 text-orange-500" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/>
-              </svg>
-              <span className="text-gray-700 font-semibold text-lg">Solo Estudiantes Verificados</span>
-            </div>
-          </div>
-
-          {/* Main Headline */}
-          {searchResults.length === 0 && (
-            <div className="text-center mb-16">
-              <h1 className="text-7xl font-bold text-white mb-6 leading-tight tracking-tight">
-                Comparte Viajes,<br />
-                Ahorra Dinero,<br />
-                Haz Amigos
-              </h1>
-              <p className="text-2xl text-white/95 max-w-3xl mx-auto leading-relaxed">
-                UniGO: La plataforma de viajes compartidos para estudiantes universitarios, garantizando un viaje seguro con reservas aprobadas por el conductor.
-              </p>
-            </div>
-          )}
-
-        {/* Search Form */}
-          <div className={`bg-white rounded-3xl p-8 shadow-2xl w-full max-w-5xl border border-gray-100 ${searchResults.length > 0 ? 'mb-8' : ''}`}>
+        <div className="flex flex-col items-center justify-center px-8 min-h-[calc(100vh-80px)]">
+          {/* Search Form - Centered and Prominent */}
+          <div className="bg-white rounded-3xl p-8 shadow-2xl w-full max-w-5xl border border-gray-100 mb-8 mt-8" style={{ overflow: 'visible' }}>
             <form onSubmit={(e) => {
               e.preventDefault();
               const formData = new FormData(e.target as HTMLFormElement);
-              const searchData = {
-                from: formData.get('from'),
-                to: formData.get('to'),
-                date: formData.get('date')
-              };
-              handleSearch(searchData);
-            }} className="flex items-center space-x-6">
+              const date = formData.get('date') as string;
+              handleSearch(date || "");
+            }} autoComplete="off" className="flex flex-col md:flex-row items-start md:items-end space-y-4 md:space-y-0 md:space-x-6" style={{ overflow: 'visible' }}>
               {/* From Field */}
-              <div className="flex-1">
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                    <svg className="w-6 h-6 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd"/>
-                    </svg>
-                  </div>
-                  <input
-                    type="text"
-                    name="from"
-                    placeholder="Desde"
-                    className="w-full pl-12 pr-4 py-5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-lg font-medium placeholder-gray-400"
-                  />
-                </div>
+              <div className="flex-1 w-full md:w-auto" style={{ overflow: 'visible', position: 'relative' }}>
+                <AddressAutocomplete
+                  id="search-from"
+                  placeholder="Ej. Calle Gran Vía, 1"
+                  initialValue={fromAddress}
+                  onChange={(value) => {
+                    setFromAddress(value);
+                    setFromError("");
+                  }}
+                  required={false}
+                  error={fromError}
+                  showVerifiedBadge={false}
+                  className="w-full"
+                />
               </div>
 
               {/* To Field */}
-              <div className="flex-1">
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                    <svg className="w-6 h-6 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd"/>
-                    </svg>
-                  </div>
-                  <input
-                    type="text"
-                    name="to"
-                    placeholder="Hasta"
-                    className="w-full pl-12 pr-4 py-5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-lg font-medium placeholder-gray-400"
-                  />
-                </div>
+              <div className="flex-1 w-full md:w-auto" style={{ overflow: 'visible', position: 'relative' }}>
+                <AddressAutocomplete
+                  id="search-to"
+                  placeholder="Ej. Universidad CEU"
+                  initialValue={toAddress}
+                  onChange={(value) => {
+                    setToAddress(value);
+                    setToError("");
+                  }}
+                  required={false}
+                  error={toError}
+                  showVerifiedBadge={false}
+                  className="w-full"
+                />
               </div>
 
               {/* Date Field */}
-              <div className="flex-1">
+              <div className="flex-1 w-full md:w-auto">
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                     <svg className="w-6 h-6 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
@@ -334,7 +322,7 @@ export default function Home() {
               {/* Search Button */}
               <button
                 type="submit"
-                className="bg-orange-500 text-white px-10 py-5 rounded-xl font-semibold hover:bg-orange-600 transition-colors flex items-center space-x-3 shadow-lg text-lg"
+                className="bg-orange-500 text-white px-10 py-5 rounded-xl font-semibold hover:bg-orange-600 transition-colors flex items-center space-x-3 shadow-lg text-lg w-full md:w-auto"
               >
                 <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd"/>
@@ -344,14 +332,64 @@ export default function Home() {
             </form>
           </div>
 
+          {/* Verified Students Badge - Below Form */}
+          {searchResults.length === 0 && (
+            <div className="bg-white border border-orange-200 rounded-full px-8 py-3 mb-8 shadow-lg">
+              <div className="flex items-center space-x-3">
+                <svg className="w-6 h-6 text-orange-500" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/>
+                </svg>
+                <span className="text-gray-700 font-semibold text-lg">Solo Estudiantes Verificados</span>
+              </div>
+            </div>
+          )}
+
+          {/* Main Headline - Below Form */}
+          {searchResults.length === 0 && (
+            <div className="text-center mb-8">
+              <h1 className="text-5xl font-bold text-white mb-4 leading-tight tracking-tight">
+                Comparte Viajes,<br />
+                Ahorra Dinero,<br />
+                Haz Amigos
+              </h1>
+              <p className="text-xl text-white/95 max-w-3xl mx-auto leading-relaxed">
+                UniGO: La plataforma de viajes compartidos para estudiantes universitarios, garantizando un viaje seguro con reservas aprobadas por el conductor.
+              </p>
+            </div>
+          )}
+
           {/* Search Results Section */}
           {searchParams && (
             <div className="w-full max-w-6xl mt-12">
               <div className="mb-8">
                 <h2 className="text-3xl font-bold text-white mb-4">Resultados de Búsqueda</h2>
-                <p className="text-white/90 text-lg">
-                  {searchParams.from} → {searchParams.to} {searchParams.date && `• ${searchParams.date}`}
-                </p>
+                {(() => {
+                  const hasFrom = searchParams.from?.formattedAddress;
+                  const hasTo = searchParams.to?.formattedAddress;
+                  const hasDate = searchParams.date;
+                  
+                  // Build search description
+                  const parts: string[] = [];
+                  if (hasFrom && hasTo) {
+                    parts.push(`${hasFrom} → ${hasTo}`);
+                  } else if (hasFrom) {
+                    parts.push(`Desde: ${hasFrom}`);
+                  } else if (hasTo) {
+                    parts.push(`Hasta: ${hasTo}`);
+                  } else {
+                    parts.push("Todos los viajes disponibles");
+                  }
+                  
+                  if (hasDate) {
+                    parts.push(`• ${hasDate}`);
+                  }
+                  
+                  return (
+                    <p className="text-white/90 text-lg">
+                      {parts.join(" ")}
+                    </p>
+                  );
+                })()}
               </div>
 
               {/* Show Results or No Results Message */}

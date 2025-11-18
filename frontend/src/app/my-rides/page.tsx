@@ -2,7 +2,10 @@
 
 import { useState, useEffect } from "react";
 import DesktopLayout from "@/components/DesktopLayout";
-import { getToken, Ride, getMyRides, getMyBookings } from "@/lib/api";
+import ConfirmModal from "@/components/ConfirmModal";
+import RatingModal from "@/components/RatingModal";
+import PassengerSelectionModal, { Passenger } from "@/components/PassengerSelectionModal";
+import { getToken, Ride, getMyRides, getMyBookings, cancelRide, cancelBooking, getRideHistory, RideHistoryItem, createRating } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -11,9 +14,41 @@ export default function MyRidesPage() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [driverRides, setDriverRides] = useState<Ride[]>([]);
   const [bookings, setBookings] = useState<Ride[]>([]);
+  const [rideHistory, setRideHistory] = useState<RideHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showInactive, setShowInactive] = useState(false);
-  const [activeTab, setActiveTab] = useState<'driver' | 'passenger'>('driver');
+  const [activeTab, setActiveTab] = useState<'driver' | 'passenger' | 'history'>('driver');
+  const [cancelModal, setCancelModal] = useState<{
+    isOpen: boolean;
+    type: 'ride' | 'booking';
+    rideId: number | null;
+  }>({
+    isOpen: false,
+    type: 'ride',
+    rideId: null,
+  });
+  const [ratingModal, setRatingModal] = useState<{
+    isOpen: boolean;
+    bookingId: number | null;
+    ratedUserName: string; // Name of the person being rated
+    ratedUserAvatar?: string | null; // Avatar of the person being rated
+    ratedUserRole: "conductor" | "pasajero";
+  }>({
+    isOpen: false,
+    bookingId: null,
+    ratedUserName: "",
+    ratedUserAvatar: null,
+    ratedUserRole: "conductor",
+  });
+  const [passengerSelectionModal, setPassengerSelectionModal] = useState<{
+    isOpen: boolean;
+    rideId: number | null;
+    passengers: Passenger[];
+  }>({
+    isOpen: false,
+    rideId: null,
+    passengers: [],
+  });
 
   useEffect(() => {
     const token = getToken();
@@ -22,9 +57,38 @@ export default function MyRidesPage() {
     if (token) {
       fetchMyRides();
       fetchMyBookings();
+      fetchRideHistory();
     } else {
       setLoading(false);
     }
+
+    // Set up auto-refresh every 60 seconds to update ride lists
+    const refreshInterval = setInterval(() => {
+      const currentToken = getToken();
+      if (currentToken) {
+        fetchMyRides();
+        fetchMyBookings();
+        fetchRideHistory();
+      }
+    }, 60000); // Refresh every minute
+
+    // Refresh when tab becomes visible
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        const currentToken = getToken();
+        if (currentToken) {
+          fetchMyRides();
+          fetchMyBookings();
+          fetchRideHistory();
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(refreshInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   const fetchMyRides = async () => {
@@ -46,6 +110,136 @@ export default function MyRidesPage() {
     } catch (error) {
       console.error("Error fetching bookings:", error);
     }
+  };
+
+  const fetchRideHistory = async () => {
+    try {
+      const history = await getRideHistory();
+      setRideHistory(history);
+    } catch (error) {
+      console.error("Error fetching ride history:", error);
+    }
+  };
+
+  const handleCancelRide = (rideId: number) => {
+    setCancelModal({
+      isOpen: true,
+      type: 'ride',
+      rideId: rideId,
+    });
+  };
+
+  const handleCancelBooking = (rideId: number) => {
+    setCancelModal({
+      isOpen: true,
+      type: 'booking',
+      rideId: rideId,
+    });
+  };
+
+  const confirmCancel = async () => {
+    if (!cancelModal.rideId) return;
+
+    try {
+      if (cancelModal.type === 'ride') {
+        await cancelRide(cancelModal.rideId);
+        await fetchMyRides();
+        await fetchRideHistory(); // Refresh history to show cancelled ride
+      } else {
+        await cancelBooking(cancelModal.rideId);
+        await fetchMyBookings();
+        await fetchRideHistory(); // Refresh history in case the ride was cancelled
+      }
+      setCancelModal({ isOpen: false, type: 'ride', rideId: null });
+    } catch (error) {
+      console.error("Error canceling:", error);
+      alert(
+        cancelModal.type === 'ride'
+          ? "Error al cancelar el viaje. Por favor, intenta de nuevo."
+          : "Error al cancelar la reserva. Por favor, intenta de nuevo."
+      );
+    }
+  };
+
+  const closeCancelModal = () => {
+    setCancelModal({ isOpen: false, type: 'ride', rideId: null });
+  };
+
+  const handleRateClick = async (ride: RideHistoryItem) => {
+    // For driver rides with multiple passengers, show passenger selection modal
+    if (ride.role === "conductor" && ride.passengers && ride.passengers.length > 0) {
+      setPassengerSelectionModal({
+        isOpen: true,
+        rideId: ride.id,
+        passengers: ride.passengers,
+      });
+      return;
+    }
+    
+    // For passenger rides or legacy driver rides (single passenger), use direct rating
+    if (!ride.can_rate || !ride.booking_id) return;
+    
+    // Use the rated user information from the ride (the person being rated)
+    const ratedUserName = ride.rated_user_name || ride.driver_name || "Usuario";
+    const ratedUserAvatar = ride.rated_user_avatar || null;
+    const ratedUserRole = ride.role === "conductor" ? "pasajero" : "conductor";
+    
+    setRatingModal({
+      isOpen: true,
+      bookingId: ride.booking_id,
+      ratedUserName: ratedUserName,
+      ratedUserAvatar: ratedUserAvatar,
+      ratedUserRole: ratedUserRole,
+    });
+  };
+
+  const handlePassengerSelect = (passenger: Passenger) => {
+    // Open rating modal for selected passenger
+    setRatingModal({
+      isOpen: true,
+      bookingId: passenger.booking_id,
+      ratedUserName: passenger.passenger_name,
+      ratedUserAvatar: passenger.passenger_avatar || null,
+      ratedUserRole: "pasajero",
+    });
+    setPassengerSelectionModal({
+      isOpen: false,
+      rideId: null,
+      passengers: [],
+    });
+  };
+
+  const closePassengerSelectionModal = () => {
+    setPassengerSelectionModal({
+      isOpen: false,
+      rideId: null,
+      passengers: [],
+    });
+  };
+
+  const handleRatingSubmit = async (rating: number, comment?: string) => {
+    if (!ratingModal.bookingId) {
+      throw new Error("No se pudo identificar la reserva");
+    }
+
+    await createRating({
+      booking_id: ratingModal.bookingId,
+      rating: rating,
+      comment: comment,
+    });
+
+    // Refresh ride history to update has_rated and can_rate
+    await fetchRideHistory();
+  };
+
+  const closeRatingModal = () => {
+    setRatingModal({
+      isOpen: false,
+      bookingId: null,
+      ratedUserName: "",
+      ratedUserAvatar: null,
+      ratedUserRole: "conductor",
+    });
   };
 
   const handleProfileClick = () => {
@@ -80,6 +274,50 @@ export default function MyRidesPage() {
         </span>
       );
     }
+  };
+
+  const getRoleBadge = (role: "conductor" | "pasajero") => {
+    if (role === "conductor") {
+      return (
+        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-orange-100 text-orange-800">
+          Conductor
+        </span>
+      );
+    } else {
+      return (
+        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
+          Pasajero
+        </span>
+      );
+    }
+  };
+
+  const getHistoryStatusBadge = (status?: "cancelled" | "completed") => {
+    if (status === "cancelled") {
+      return (
+        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+          Cancelado
+        </span>
+      );
+    } else {
+      return (
+        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+          Completado
+        </span>
+      );
+    }
+  };
+
+  const formatDuration = (minutes: number) => {
+    if (minutes < 60) {
+      return `${minutes} min`;
+    }
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (mins === 0) {
+      return `${hours} h`;
+    }
+    return `${hours} h ${mins} min`;
   };
 
   const displayedRides = showInactive 
@@ -184,6 +422,16 @@ export default function MyRidesPage() {
               >
                 Mis reservas como pasajero
               </button>
+              <button
+                onClick={() => setActiveTab('history')}
+                className={`pb-4 px-6 font-semibold text-lg border-b-2 transition-colors ${
+                  activeTab === 'history'
+                    ? 'border-orange-500 text-orange-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Registro
+              </button>
             </div>
           </div>
 
@@ -200,7 +448,7 @@ export default function MyRidesPage() {
           )}
 
           {/* Content Based on Active Tab */}
-          {activeTab === 'driver' ? (
+          {activeTab === 'driver' && (
             /* My trips as a driver */
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
               {displayedRides.length === 0 ? (
@@ -221,7 +469,7 @@ export default function MyRidesPage() {
                       key={ride.id}
                       className="border border-gray-200 rounded-xl p-6 hover:shadow-md transition-shadow"
                     >
-                      <div className="flex items-start justify-between">
+                      <div className="flex items-center justify-between">
                         <div className="flex-1">
                           <div className="flex items-center space-x-3 mb-3">
                             {getStatusBadge(ride.is_active)}
@@ -240,8 +488,13 @@ export default function MyRidesPage() {
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
                             </svg>
                             
-                            <div>
-                              <div className="text-lg font-semibold text-gray-900">{ride.destination_city}</div>
+                            <div className="flex items-center space-x-3">
+                              <div>
+                                <div className="text-lg font-semibold text-gray-900">{ride.destination_city}</div>
+                              </div>
+                              {ride.arrival_time && (
+                                <div className="text-2xl font-bold text-gray-800">{ride.arrival_time}</div>
+                              )}
                             </div>
                           </div>
                           
@@ -255,10 +508,21 @@ export default function MyRidesPage() {
                             <div>
                               <span className="font-medium text-gray-900">Vehículo:</span> {ride.vehicle_info || 'N/A'}
                             </div>
-                            <div>
+                            {ride.estimated_duration_minutes ? (
+                              <div>
+                                <span className="font-medium text-gray-900">Duración estimada:</span> {formatDuration(ride.estimated_duration_minutes)}
+                              </div>
+                            ) : (
+                              <div>
+                                <span className="font-medium text-gray-900">Creado:</span> {new Date(ride.created_at).toLocaleDateString()}
+                              </div>
+                            )}
+                          </div>
+                          {ride.estimated_duration_minutes && (
+                            <div className="mt-2 text-sm text-gray-600">
                               <span className="font-medium text-gray-900">Creado:</span> {new Date(ride.created_at).toLocaleDateString()}
                             </div>
-                          </div>
+                          )}
                           
                           {ride.additional_details && (
                             <div className="mt-3 text-sm text-gray-600 bg-gray-50 rounded-lg p-3">
@@ -266,13 +530,25 @@ export default function MyRidesPage() {
                             </div>
                           )}
                         </div>
+                        {ride.is_active && (
+                          <div className="ml-6 flex items-center">
+                            <button
+                              onClick={() => handleCancelRide(ride.id)}
+                              className="px-4 py-2 bg-red-500 text-white rounded-lg font-medium hover:bg-red-600 transition-colors text-sm"
+                            >
+                              Cancelar Viaje
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-          ) : (
+          )}
+
+          {activeTab === 'passenger' && (
             /* My bookings as a passenger */
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
               {bookings.length === 0 ? (
@@ -293,7 +569,7 @@ export default function MyRidesPage() {
                       key={ride.id}
                       className="border border-gray-200 rounded-xl p-6 hover:shadow-md transition-shadow"
                     >
-                      <div className="flex items-start justify-between">
+                      <div className="flex items-center justify-between">
                         <div className="flex-1">
                           <div className="flex items-center space-x-2 mb-3">
                             <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
@@ -314,8 +590,13 @@ export default function MyRidesPage() {
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
                             </svg>
                             
-                            <div>
-                              <div className="text-lg font-semibold text-gray-900">{ride.destination_city}</div>
+                            <div className="flex items-center space-x-3">
+                              <div>
+                                <div className="text-lg font-semibold text-gray-900">{ride.destination_city}</div>
+                              </div>
+                              {ride.arrival_time && (
+                                <div className="text-2xl font-bold text-gray-800">{ride.arrival_time}</div>
+                              )}
                             </div>
                           </div>
                           
@@ -329,10 +610,21 @@ export default function MyRidesPage() {
                             <div>
                               <span className="font-medium text-gray-900">Precio por asiento:</span> {ride.price_per_seat.toFixed(2)} €
                             </div>
-                            <div>
+                            {ride.estimated_duration_minutes ? (
+                              <div>
+                                <span className="font-medium text-gray-900">Duración estimada:</span> {formatDuration(ride.estimated_duration_minutes)}
+                              </div>
+                            ) : (
+                              <div>
+                                <span className="font-medium text-gray-900">Vehículo:</span> {ride.vehicle_info || 'N/A'}
+                              </div>
+                            )}
+                          </div>
+                          {ride.estimated_duration_minutes && (
+                            <div className="mt-2 text-sm text-gray-600">
                               <span className="font-medium text-gray-900">Vehículo:</span> {ride.vehicle_info || 'N/A'}
                             </div>
-                          </div>
+                          )}
                           
                           {ride.additional_details && (
                             <div className="mt-3 text-sm text-gray-600 bg-gray-50 rounded-lg p-3">
@@ -340,6 +632,106 @@ export default function MyRidesPage() {
                             </div>
                           )}
                         </div>
+                        <div className="ml-6 flex items-center">
+                          <button
+                            onClick={() => handleCancelBooking(ride.id)}
+                            className="px-4 py-2 bg-red-500 text-white rounded-lg font-medium hover:bg-red-600 transition-colors text-sm"
+                          >
+                            Cancelar Reserva
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'history' && (
+            /* Ride History / Registro */
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
+              {rideHistory.length === 0 ? (
+                <div className="text-center py-12">
+                  <svg className="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <p className="text-gray-600 text-lg mb-2">Aún no hay viajes en el registro</p>
+                  <p className="text-gray-500">Los viajes completados aparecerán aquí automáticamente</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {rideHistory.map((ride, index) => (
+                    <div
+                      key={ride.booking_id ? `${ride.id}-${ride.booking_id}` : `${ride.id}-${index}`}
+                      className="border border-gray-200 rounded-xl p-6 hover:shadow-md transition-shadow"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-3 mb-3">
+                            {getRoleBadge(ride.role)}
+                            {getHistoryStatusBadge(ride.status)}
+                          </div>
+                          
+                          <div className="flex items-start space-x-6 mb-4">
+                            <div className="flex items-center space-x-2">
+                              <div className="text-2xl font-bold text-gray-800">{ride.departure_time}</div>
+                              <div>
+                                <div className="text-lg font-semibold text-gray-900">{ride.departure_city}</div>
+                                <div className="text-sm text-gray-500">{formatDate(ride.departure_date)}</div>
+                              </div>
+                            </div>
+                            
+                            <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                            </svg>
+                            
+                            <div className="flex items-center space-x-3">
+                              <div>
+                                <div className="text-lg font-semibold text-gray-900">{ride.destination_city}</div>
+                              </div>
+                              {ride.arrival_time && (
+                                <div className="text-2xl font-bold text-gray-800">{ride.arrival_time}</div>
+                              )}
+                            </div>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-600">
+                            {ride.role === "pasajero" && (
+                              <div>
+                                <span className="font-medium text-gray-900">Conductor:</span> {ride.driver_name}
+                              </div>
+                            )}
+                            <div>
+                              <span className="font-medium text-gray-900">Precio por asiento:</span> {ride.price_per_seat.toFixed(2)} €
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-900">Vehículo:</span> {ride.vehicle_info || 'N/A'}
+                            </div>
+                            {ride.estimated_duration_minutes && (
+                              <div>
+                                <span className="font-medium text-gray-900">Duración:</span> {Math.floor(ride.estimated_duration_minutes / 60)}h {ride.estimated_duration_minutes % 60}min
+                              </div>
+                            )}
+                          </div>
+                          
+                          {ride.additional_details && (
+                            <div className="mt-3 text-sm text-gray-600 bg-gray-50 rounded-lg p-3">
+                              <span className="font-medium text-gray-900">Detalles:</span> {ride.additional_details}
+                            </div>
+                          )}
+                        </div>
+                        {/* Show rating button for drivers if there are pending passengers, or for passengers if can_rate */}
+                        {((ride.role === "conductor" && ride.has_pending_ratings) || (ride.role === "pasajero" && ride.can_rate && ride.booking_id)) && (
+                          <div className="ml-6 flex items-center">
+                            <button
+                              onClick={() => handleRateClick(ride)}
+                              className="px-4 py-2 bg-orange-500 text-white rounded-lg font-medium hover:bg-orange-600 transition-colors text-sm"
+                            >
+                              Valorar
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -349,6 +741,44 @@ export default function MyRidesPage() {
           )}
         </div>
       </div>
+
+      {/* Cancel Confirmation Modal */}
+      <ConfirmModal
+        isOpen={cancelModal.isOpen}
+        title={
+          cancelModal.type === 'ride'
+            ? "Cancelar Viaje"
+            : "Cancelar Reserva"
+        }
+        message={
+          cancelModal.type === 'ride'
+            ? "¿Estás seguro de que quieres cancelar este viaje? Esta acción no se puede deshacer."
+            : "¿Estás seguro de que quieres cancelar esta reserva? Los asientos se liberarán automáticamente."
+        }
+        confirmText="Sí, cancelar"
+        cancelText="No, mantener"
+        confirmButtonColor="red"
+        onConfirm={confirmCancel}
+        onCancel={closeCancelModal}
+      />
+
+      {/* Rating Modal */}
+      <RatingModal
+        isOpen={ratingModal.isOpen}
+        ratedUserName={ratingModal.ratedUserName}
+        ratedUserAvatar={ratingModal.ratedUserAvatar}
+        ratedUserRole={ratingModal.ratedUserRole}
+        onClose={closeRatingModal}
+        onSubmit={handleRatingSubmit}
+      />
+
+      {/* Passenger Selection Modal */}
+      <PassengerSelectionModal
+        isOpen={passengerSelectionModal.isOpen}
+        passengers={passengerSelectionModal.passengers}
+        onClose={closePassengerSelectionModal}
+        onSelectPassenger={handlePassengerSelect}
+      />
     </DesktopLayout>
   );
 }

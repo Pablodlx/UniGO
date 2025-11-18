@@ -31,3 +31,6 @@ class ProfileUpdate(ProfileBase):
 
 class ProfileOut(ProfileBase):
     email: str
+    average_rating: float | None = None
+    rating_count: int = 0
+    average_rating_display: str = "No hay valoraciones"  # Display text for average rating

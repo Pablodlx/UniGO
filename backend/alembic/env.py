@@ -10,7 +10,7 @@ from alembic import context
 from app.db.session import DATABASE_URL
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from app.auth.models import EmailCode, User  # noqa: F401
+from app.auth.models import EmailCode, User, Rating, Booking, Ride  # noqa: F401
 from app.core.config import settings
 from app.db.session import Base
 
@@ -22,7 +22,7 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    url = settings.database_url
+    url = os.getenv("DATABASE_URL", DATABASE_URL)
     context.configure(
         url=url, target_metadata=target_metadata, literal_binds=True, compare_type=True
     )

@@ -17,20 +17,34 @@ depends_on = None
 
 
 def upgrade():
-    # Create bookings table
-    op.create_table('bookings',
-    sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('ride_id', sa.Integer(), nullable=False),
-    sa.Column('passenger_id', sa.Integer(), nullable=False),
-    sa.Column('status', sa.String(length=50), nullable=False),
-    sa.Column('seats', sa.Integer(), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.ForeignKeyConstraint(['ride_id'], ['rides.id'], ),
-    sa.ForeignKeyConstraint(['passenger_id'], ['users.id'], ),
-    sa.PrimaryKeyConstraint('id')
-    )
-    op.create_index(op.f('ix_bookings_ride_id'), 'bookings', ['ride_id'], unique=False)
-    op.create_index(op.f('ix_bookings_passenger_id'), 'bookings', ['passenger_id'], unique=False)
+    # Check if bookings table already exists (it might have been created manually in main.py)
+    from sqlalchemy import inspect
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    tables = inspector.get_table_names()
+    
+    if 'bookings' not in tables:
+        # Create bookings table
+        op.create_table('bookings',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('ride_id', sa.Integer(), nullable=False),
+        sa.Column('passenger_id', sa.Integer(), nullable=False),
+        sa.Column('status', sa.String(length=50), nullable=False),
+        sa.Column('seats', sa.Integer(), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(['ride_id'], ['rides.id'], ),
+        sa.ForeignKeyConstraint(['passenger_id'], ['users.id'], ),
+        sa.PrimaryKeyConstraint('id')
+        )
+        op.create_index(op.f('ix_bookings_ride_id'), 'bookings', ['ride_id'], unique=False)
+        op.create_index(op.f('ix_bookings_passenger_id'), 'bookings', ['passenger_id'], unique=False)
+    else:
+        # Table exists, but check if indexes exist
+        indexes = [idx['name'] for idx in inspector.get_indexes('bookings')]
+        if 'ix_bookings_ride_id' not in indexes:
+            op.create_index(op.f('ix_bookings_ride_id'), 'bookings', ['ride_id'], unique=False)
+        if 'ix_bookings_passenger_id' not in indexes:
+            op.create_index(op.f('ix_bookings_passenger_id'), 'bookings', ['passenger_id'], unique=False)
     # ### end Alembic commands ###
 
 
@@ -40,4 +54,5 @@ def downgrade():
     op.drop_index(op.f('ix_bookings_ride_id'), table_name='bookings')
     op.drop_table('bookings')
     # ### end Alembic commands ###
+
 

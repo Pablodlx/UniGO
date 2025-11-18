@@ -1,7 +1,8 @@
 import enum
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Enum, Integer, String, Text, Float, ForeignKey
+from typing import Optional
+from sqlalchemy import Boolean, Column, DateTime, Enum, Integer, String, Text, Float, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
@@ -33,6 +34,8 @@ class User(Base):
     # Relationships
     rides: Mapped[list["Ride"]] = relationship("Ride", back_populates="driver")
     bookings: Mapped[list["Booking"]] = relationship("Booking", back_populates="passenger")
+    ratings_given: Mapped[list["Rating"]] = relationship("Rating", foreign_keys="Rating.rater_id", back_populates="rater")
+    ratings_received: Mapped[list["Rating"]] = relationship("Rating", foreign_keys="Rating.rated_id", back_populates="rated")
 
 
 class EmailCode(Base):
@@ -61,6 +64,11 @@ class Ride(Base):
     driver_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     departure_city: Mapped[str] = mapped_column(String(100), nullable=False)
     destination_city: Mapped[str] = mapped_column(String(100), nullable=False)
+    departure_lat: Mapped[float] = mapped_column(Float, nullable=True)
+    departure_lng: Mapped[float] = mapped_column(Float, nullable=True)
+    destination_lat: Mapped[float] = mapped_column(Float, nullable=True)
+    destination_lng: Mapped[float] = mapped_column(Float, nullable=True)
+    estimated_duration_minutes: Mapped[int] = mapped_column(Integer, nullable=True)
     departure_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     departure_time: Mapped[str] = mapped_column(String(10), nullable=False)  # "HH:MM" format
     available_seats: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -92,3 +100,27 @@ class Booking(Base):
     # Relationships
     ride: Mapped["Ride"] = relationship("Ride", back_populates="bookings")
     passenger: Mapped["User"] = relationship("User", back_populates="bookings")
+    ratings: Mapped[list["Rating"]] = relationship("Rating", back_populates="booking")
+
+
+class Rating(Base):
+    __tablename__ = "ratings"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    booking_id: Mapped[int] = mapped_column(ForeignKey("bookings.id"), nullable=False)
+    rater_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)  # Who gave the rating
+    rated_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)  # Who was rated
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)  # 1-5 stars
+    comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Optional text review
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    
+    # Relationships
+    booking: Mapped["Booking"] = relationship("Booking", back_populates="ratings")
+    rater: Mapped["User"] = relationship("User", foreign_keys=[rater_id], back_populates="ratings_given")
+    rated: Mapped["User"] = relationship("User", foreign_keys=[rated_id], back_populates="ratings_received")
+    
+    # Unique constraint: one rating per booking per rater
+    __table_args__ = (
+        UniqueConstraint('booking_id', 'rater_id', name='uq_rating_booking_rater'),
+    )

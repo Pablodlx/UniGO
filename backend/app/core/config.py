@@ -1,8 +1,15 @@
 # app/core/config.py
 import json
+import os
 
 from pydantic import EmailStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Calculate .env file path before class definition
+_backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_env_file_path = os.path.join(_backend_dir, ".env")
+if not os.path.exists(_env_file_path):
+    _env_file_path = ".env"  # Fallback to current directory
 
 
 class Settings(BaseSettings):
@@ -26,9 +33,17 @@ class Settings(BaseSettings):
     mail_server: str = "127.0.0.1"
     mail_starttls: bool = False
     mail_ssl_tls: bool = False
+    
+    # --- Google Maps API ---
+    google_maps_api_key: str | None = None
 
     # Opción simple (recomendada si arrancas desde backend/)
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=_env_file_path, 
+        env_file_encoding="utf-8", 
+        extra="ignore",
+        case_sensitive=False  # Allow case-insensitive env var names
+    )
 
     @field_validator("allowed_email_domains", mode="before")
     @classmethod

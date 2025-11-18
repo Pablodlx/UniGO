@@ -22,6 +22,18 @@ export default function RideDetail({ ride, onBack, onContact, bookingSuccess = f
     return timeString;
   };
 
+  const formatDuration = (minutes: number) => {
+    if (minutes < 60) {
+      return `${minutes} minutos`;
+    }
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (mins === 0) {
+      return `${hours} hora${hours > 1 ? 's' : ''}`;
+    }
+    return `${hours} hora${hours > 1 ? 's' : ''} ${mins} minuto${mins > 1 ? 's' : ''}`;
+  };
+
   // Show success message if booking was successful
   if (bookingSuccess && onReturnHome) {
     return (
@@ -129,6 +141,14 @@ export default function RideDetail({ ride, onBack, onContact, bookingSuccess = f
                     <div className="text-sm text-gray-600">
                       {ride.vehicle_info || 'Sin detalles adicionales de ubicación'}
                     </div>
+                    {ride.estimated_duration_minutes && (
+                      <div className="mt-2 flex items-center space-x-2 text-sm text-orange-600">
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd"/>
+                        </svg>
+                        <span className="font-medium">Tiempo estimado: {formatDuration(ride.estimated_duration_minutes)}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -199,6 +219,14 @@ export default function RideDetail({ ride, onBack, onContact, bookingSuccess = f
                 <div>
                   <div className="text-lg font-semibold text-gray-900">{formatTime(ride.departure_time)} {ride.departure_city}</div>
                   <div className="text-sm text-gray-600">{ride.vehicle_info || 'Ubicación de salida'}</div>
+                  {ride.estimated_duration_minutes && (
+                    <div className="mt-2 flex items-center space-x-2 text-sm text-gray-700">
+                      <svg className="w-4 h-4 text-orange-500" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd"/>
+                      </svg>
+                      <span className="font-medium">Duración estimada: {formatDuration(ride.estimated_duration_minutes)}</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Driver Summary */}

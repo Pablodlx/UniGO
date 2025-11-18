@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class RideBase(BaseModel):
@@ -15,8 +15,26 @@ class RideBase(BaseModel):
     additional_details: Optional[str] = Field(None, max_length=500)
 
 
+class AddressData(BaseModel):
+    """Address data with coordinates"""
+    placeId: Optional[str] = None
+    formattedAddress: str
+    lat: float
+    lng: float
+
+
 class RideCreate(RideBase):
-    pass
+    # Optional: coordinates can be provided via 'from' and 'to' objects
+    # or will be extracted from departure_city/destination_city if not provided
+    departure_lat: Optional[float] = None
+    departure_lng: Optional[float] = None
+    destination_lat: Optional[float] = None
+    destination_lng: Optional[float] = None
+    # Support for frontend format with 'from' and 'to' objects
+    from_: Optional[AddressData] = Field(None, alias="from")
+    to: Optional[AddressData] = None
+    
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class RideOut(RideBase):
@@ -24,8 +42,11 @@ class RideOut(RideBase):
     driver_id: int
     driver_name: str
     driver_university: Optional[str]
+    estimated_duration_minutes: Optional[int] = None
+    arrival_time: Optional[str] = None  # "HH:MM" format, calculated from departure_time + duration
     is_active: bool
     created_at: datetime
+    driver_average_rating: Optional[float] = None
 
     class Config:
         from_attributes = True

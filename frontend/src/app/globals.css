@@ -24,3 +24,50 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Google Places Autocomplete dropdown z-index fix for mobile */
+.pac-container {
+  z-index: 9999 !important;
+  display: none !important; /* Hide default Google dropdown since we use custom */
+}
+
+/* Custom Address Autocomplete dropdown styling */
+[id$="-dropdown"] {
+  z-index: 10000 !important;
+  position: absolute !important;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  background: white !important;
+  border: 2px solid #fdba74 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.2) !important;
+}
+
+/* Make sure dropdown items are visible and clickable */
+[id$="-dropdown"] button {
+  background: white !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+
+[id$="-dropdown"] button:hover {
+  background: #fff7ed !important;
+}
+
+[id$="-dropdown"] button:active {
+  background: #ffedd5 !important;
+}
+
+/* Ensure dropdown items are clickable and don't cause layout shifts */
+[role="option"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+/* Prevent text selection on dropdown items */
+[role="listbox"] button {
+  user-select: none;
+  -webkit-user-select: none;
+}

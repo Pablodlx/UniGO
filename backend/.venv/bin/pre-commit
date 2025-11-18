@@ -1,4 +1,4 @@
-#!/home/pablodlx/UniGO/backend/.venv/bin/python3
+#!/home/alberto/UniGO/backend/.venv/bin/python3
 import sys
 from pre_commit.main import main
 if __name__ == '__main__':
