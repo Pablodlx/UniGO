@@ -36,6 +36,7 @@ class User(Base):
     bookings: Mapped[list["Booking"]] = relationship("Booking", back_populates="passenger")
     ratings_given: Mapped[list["Rating"]] = relationship("Rating", foreign_keys="Rating.rater_id", back_populates="rater")
     ratings_received: Mapped[list["Rating"]] = relationship("Rating", foreign_keys="Rating.rated_id", back_populates="rated")
+    favorite_rides: Mapped[list["FavoriteRide"]] = relationship("FavoriteRide", back_populates="user")
 
 
 class EmailCode(Base):
@@ -125,3 +126,35 @@ class Rating(Base):
     __table_args__ = (
         UniqueConstraint('booking_id', 'rater_id', name='uq_rating_booking_rater'),
     )
+
+
+class FavoriteRide(Base):
+    __tablename__ = "favorite_rides"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Store ride template data as JSON fields
+    departure_city: Mapped[str] = mapped_column(String(100), nullable=False)
+    destination_city: Mapped[str] = mapped_column(String(100), nullable=False)
+    departure_lat: Mapped[float] = mapped_column(Float, nullable=True)
+    departure_lng: Mapped[float] = mapped_column(Float, nullable=True)
+    destination_lat: Mapped[float] = mapped_column(Float, nullable=True)
+    destination_lng: Mapped[float] = mapped_column(Float, nullable=True)
+    departure_time: Mapped[str] = mapped_column(String(10), nullable=True)  # "HH:MM" format (optional, might not always be the same)
+    available_seats: Mapped[int] = mapped_column(Integer, nullable=True)
+    price_per_seat: Mapped[float] = mapped_column(Float, nullable=True)
+    vehicle_brand: Mapped[str] = mapped_column(String(100), nullable=True)
+    vehicle_color: Mapped[str] = mapped_column(String(50), nullable=True)
+    additional_details: Mapped[str] = mapped_column(Text, nullable=True)
+    # Store address objects as JSON strings for easy frontend use
+    from_address: Mapped[str] = mapped_column(Text, nullable=True)  # JSON string of AddressData
+    to_address: Mapped[str] = mapped_column(Text, nullable=True)  # JSON string of AddressData
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    
+    # Relationship to User
+    user: Mapped["User"] = relationship("User", back_populates="favorite_rides")

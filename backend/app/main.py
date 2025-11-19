@@ -9,7 +9,7 @@ from app.rides import router as rides_router
 from app.ratings import router as ratings_router
 
 # Import all models to ensure they're registered
-from app.auth.models import User, Ride, Booking, EmailCode, Rating
+from app.auth.models import User, Ride, Booking, EmailCode, Rating, FavoriteRide
 from app.db.session import Base, engine
 
 # Create all tables if they don't exist (development only)

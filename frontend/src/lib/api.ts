@@ -277,3 +277,94 @@ export async function createRating(data: CreateRatingRequest): Promise<RatingRes
     body: JSON.stringify(data),
   });
 }
+
+// --- Favorite Rides ---
+export interface FavoriteRide {
+  id: number;
+  user_id: number;
+  name: string;
+  departure_city: string;
+  destination_city: string;
+  departure_lat?: number;
+  departure_lng?: number;
+  destination_lat?: number;
+  destination_lng?: number;
+  departure_time?: string;
+  available_seats?: number;
+  price_per_seat?: number;
+  vehicle_brand?: string;
+  vehicle_color?: string;
+  additional_details?: string;
+  from_address?: {
+    placeId?: string;
+    formattedAddress: string;
+    lat: number;
+    lng: number;
+  };
+  to_address?: {
+    placeId?: string;
+    formattedAddress: string;
+    lat: number;
+    lng: number;
+  };
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateFavoriteRideRequest {
+  name: string;
+  departure_city: string;
+  destination_city: string;
+  departure_lat?: number;
+  departure_lng?: number;
+  destination_lat?: number;
+  destination_lng?: number;
+  departure_time?: string;
+  available_seats?: number;
+  price_per_seat?: number;
+  vehicle_brand?: string;
+  vehicle_color?: string;
+  additional_details?: string;
+  from?: {
+    placeId?: string;
+    formattedAddress: string;
+    lat: number;
+    lng: number;
+  };
+  to?: {
+    placeId?: string;
+    formattedAddress: string;
+    lat: number;
+    lng: number;
+  };
+}
+
+export async function createFavoriteRide(data: CreateFavoriteRideRequest): Promise<FavoriteRide> {
+  return fetchJson<FavoriteRide>(`${BASE}/rides/favorites`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+    },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getFavoriteRides(): Promise<FavoriteRide[]> {
+  return fetchJson<FavoriteRide[]>(`${BASE}/rides/favorites`, {
+    headers: { ...authHeaders() },
+  });
+}
+
+export async function getFavoriteRide(favorite_id: number): Promise<FavoriteRide> {
+  return fetchJson<FavoriteRide>(`${BASE}/rides/favorites/${favorite_id}`, {
+    headers: { ...authHeaders() },
+  });
+}
+
+export async function deleteFavoriteRide(favorite_id: number): Promise<void> {
+  return fetchJson<void>(`${BASE}/rides/favorites/${favorite_id}`, {
+    method: "DELETE",
+    headers: { ...authHeaders() },
+  });
+}

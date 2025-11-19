@@ -55,3 +55,4 @@ def downgrade():
         if 'vehicle_color' in existing_columns:
             op.drop_column('rides', 'vehicle_color')
 
+

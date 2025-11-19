@@ -8,6 +8,8 @@ from app.auth.router import get_current_user
 from app.db.session import get_db
 from app.rides import service
 from app.rides.schemas import RideCreate, RideOut, RideSearch
+from app.rides import favorites_service
+from app.rides.favorites_schemas import FavoriteRideCreate, FavoriteRideOut
 
 router = APIRouter(prefix="/rides", tags=["Rides"])
 
@@ -399,6 +401,60 @@ def get_ride_history(
     result.sort(key=lambda x: (x["departure_date"], x["departure_time"]), reverse=True)
     
     return result
+
+
+# --- Favorite Rides Endpoints ---
+# These must come before /{ride_id} routes to avoid routing conflicts
+
+@router.post("/favorites", response_model=FavoriteRideOut)
+def create_favorite_ride(
+    favorite_data: FavoriteRideCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Create a new favorite ride"""
+    try:
+        return favorites_service.create_favorite_ride(db, favorite_data, current_user.id)
+    except Exception as e:
+        import traceback
+        print(f"Error creating favorite ride: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Error creating favorite ride: {str(e)}")
+
+
+@router.get("/favorites", response_model=List[FavoriteRideOut])
+def get_my_favorite_rides(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get all favorite rides for the current user"""
+    return favorites_service.get_user_favorite_rides(db, current_user.id)
+
+
+@router.get("/favorites/{favorite_id}", response_model=FavoriteRideOut)
+def get_favorite_ride(
+    favorite_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get a specific favorite ride by ID"""
+    favorite = favorites_service.get_favorite_ride(db, favorite_id, current_user.id)
+    if not favorite:
+        raise HTTPException(status_code=404, detail="Favorite ride not found")
+    return favorite
+
+
+@router.delete("/favorites/{favorite_id}")
+def delete_favorite_ride(
+    favorite_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a favorite ride"""
+    success = favorites_service.delete_favorite_ride(db, favorite_id, current_user.id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Favorite ride not found")
+    return {"message": "Favorite ride deleted successfully"}
 
 
 @router.get("/{ride_id}", response_model=RideOut)

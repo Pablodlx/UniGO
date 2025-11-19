@@ -1,14 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import DesktopLayout from "@/components/DesktopLayout";
 import Link from "next/link";
-import { getToken } from "@/lib/api";
+import { getToken, createFavoriteRide, getFavoriteRides, deleteFavoriteRide, FavoriteRide, CreateFavoriteRideRequest } from "@/lib/api";
 import AddressAutocomplete, { AddressValue } from "@/components/AddressAutocomplete";
+import SaveFavoriteModal from "@/components/SaveFavoriteModal";
+import FavoritesListModal from "@/components/FavoritesListModal";
+import ConfirmFavoriteModal from "@/components/ConfirmFavoriteModal";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000/api";
 
@@ -96,10 +99,19 @@ export default function PostRidePage() {
   const [toAddress, setToAddress] = useState<AddressValue | null>(null);
   const [fromError, setFromError] = useState<string>("");
   const [toError, setToError] = useState<string>("");
+  const [showSaveFavoriteModal, setShowSaveFavoriteModal] = useState(false);
+  const [showFavoritesListModal, setShowFavoritesListModal] = useState(false);
+  const [showConfirmFavoriteModal, setShowConfirmFavoriteModal] = useState(false);
+  const [favorites, setFavorites] = useState<FavoriteRide[]>([]);
+  const [selectedFavorite, setSelectedFavorite] = useState<FavoriteRide | null>(null);
+  const [loadingFavorites, setLoadingFavorites] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   const {
     register,
     handleSubmit,
+    setValue,
+    watch,
     formState: { errors, isDirty },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -113,6 +125,11 @@ export default function PostRidePage() {
       additional_details: "",
     },
   });
+
+  // Check login status on client side only to avoid hydration mismatch
+  useEffect(() => {
+    setIsLoggedIn(!!getToken());
+  }, []);
 
   const onSubmit = async (values: FormValues) => {
     setMsg(null);
@@ -198,12 +215,203 @@ export default function PostRidePage() {
     }
   };
 
-  const isLoggedIn = !!getToken();
   const handleProfileClick = () => {
     if (isLoggedIn) {
       router.push("/profile");
     } else {
       router.push("/login");
+    }
+  };
+
+  // Load favorites when opening the favorites list modal
+  useEffect(() => {
+    if (showFavoritesListModal && isLoggedIn) {
+      loadFavorites();
+    }
+  }, [showFavoritesListModal, isLoggedIn]);
+
+  const loadFavorites = async () => {
+    if (!isLoggedIn) {
+      return;
+    }
+    
+    // Double check token before making request
+    const token = getToken();
+    if (!token) {
+      setIsLoggedIn(false);
+      return;
+    }
+    
+    setLoadingFavorites(true);
+    try {
+      const favs = await getFavoriteRides();
+      setFavorites(favs);
+    } catch (error: any) {
+      console.error("Error loading favorites:", error);
+      
+      // If unauthorized, clear token and update login status
+      if (error?.message && (error.message.includes("UNAUTHORIZED") || error.message.includes("credentials") || error.message.includes("Could not validate"))) {
+        // Token is invalid, clear it
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("token");
+        }
+        setIsLoggedIn(false);
+        setShowFavoritesListModal(false);
+        setMsg("Tu sesión ha expirado. Por favor, inicia sesión nuevamente.");
+        setTimeout(() => {
+          setMsg(null);
+          router.push("/login");
+        }, 2000);
+        return;
+      }
+      
+      // Show other errors
+      if (error?.message) {
+        setMsg(error.message ?? "Error al cargar los favoritos");
+        setTimeout(() => setMsg(null), 3000);
+      }
+    } finally {
+      setLoadingFavorites(false);
+    }
+  };
+
+  const handleSaveFavorite = async (name: string) => {
+    if (!fromAddress || !toAddress) {
+      setMsg("Debes completar las direcciones de origen y destino");
+      setShowSaveFavoriteModal(false);
+      return;
+    }
+
+    // Check if user is still logged in
+    const token = getToken();
+    if (!token) {
+      setIsLoggedIn(false);
+      setShowSaveFavoriteModal(false);
+      setMsg("Tu sesión ha expirado. Por favor, inicia sesión nuevamente.");
+      setTimeout(() => {
+        setMsg(null);
+        router.push("/login");
+      }, 2000);
+      return;
+    }
+
+    try {
+      const formValues = watch();
+      const favoriteData: CreateFavoriteRideRequest = {
+        name,
+        departure_city: fromAddress.formattedAddress,
+        destination_city: toAddress.formattedAddress,
+        departure_lat: fromAddress.lat,
+        departure_lng: fromAddress.lng,
+        destination_lat: toAddress.lat,
+        destination_lng: toAddress.lng,
+        departure_time: formValues.departure_time || undefined,
+        available_seats: formValues.available_seats || undefined,
+        price_per_seat: formValues.price_per_seat || undefined,
+        vehicle_brand: formValues.vehicle_brand || undefined,
+        vehicle_color: formValues.vehicle_color || undefined,
+        additional_details: formValues.additional_details || undefined,
+        from: {
+          placeId: fromAddress.placeId,
+          formattedAddress: fromAddress.formattedAddress,
+          lat: fromAddress.lat,
+          lng: fromAddress.lng,
+        },
+        to: {
+          placeId: toAddress.placeId,
+          formattedAddress: toAddress.formattedAddress,
+          lat: toAddress.lat,
+          lng: toAddress.lng,
+        },
+      };
+
+      await createFavoriteRide(favoriteData);
+      setShowSaveFavoriteModal(false);
+      setMsg("✅ Viaje guardado como favorito!");
+      setTimeout(() => setMsg(null), 3000);
+    } catch (error: any) {
+      console.error("Error saving favorite:", error);
+      
+      // If unauthorized, clear token and update login status
+      if (error?.message && (error.message.includes("UNAUTHORIZED") || error.message.includes("credentials") || error.message.includes("Could not validate"))) {
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("token");
+        }
+        setIsLoggedIn(false);
+        setShowSaveFavoriteModal(false);
+        setMsg("Tu sesión ha expirado. Por favor, inicia sesión nuevamente.");
+        setTimeout(() => {
+          setMsg(null);
+          router.push("/login");
+        }, 2000);
+        return;
+      }
+      
+      setMsg(error?.message ?? "Error al guardar el favorito");
+      setTimeout(() => setMsg(null), 3000);
+    }
+  };
+
+  const handleSelectFavorite = (favorite: FavoriteRide) => {
+    setSelectedFavorite(favorite);
+    setShowFavoritesListModal(false);
+    setShowConfirmFavoriteModal(true);
+  };
+
+  const handleConfirmFavorite = () => {
+    if (!selectedFavorite) return;
+
+    // Autofill form with favorite data
+    if (selectedFavorite.from_address) {
+      setFromAddress({
+        placeId: selectedFavorite.from_address.placeId || undefined,
+        formattedAddress: selectedFavorite.from_address.formattedAddress,
+        lat: selectedFavorite.from_address.lat,
+        lng: selectedFavorite.from_address.lng,
+      });
+    }
+    
+    if (selectedFavorite.to_address) {
+      setToAddress({
+        placeId: selectedFavorite.to_address.placeId || undefined,
+        formattedAddress: selectedFavorite.to_address.formattedAddress,
+        lat: selectedFavorite.to_address.lat,
+        lng: selectedFavorite.to_address.lng,
+      });
+    }
+
+    if (selectedFavorite.departure_time) {
+      setValue("departure_time", selectedFavorite.departure_time);
+    }
+    if (selectedFavorite.available_seats) {
+      setValue("available_seats", selectedFavorite.available_seats);
+    }
+    if (selectedFavorite.price_per_seat) {
+      setValue("price_per_seat", selectedFavorite.price_per_seat);
+    }
+    if (selectedFavorite.vehicle_brand) {
+      setValue("vehicle_brand", selectedFavorite.vehicle_brand);
+    }
+    if (selectedFavorite.vehicle_color) {
+      setValue("vehicle_color", selectedFavorite.vehicle_color);
+    }
+    if (selectedFavorite.additional_details) {
+      setValue("additional_details", selectedFavorite.additional_details);
+    }
+
+    setShowConfirmFavoriteModal(false);
+    setSelectedFavorite(null);
+    setMsg("✅ Viaje favorito cargado. Completa la fecha y hora de salida.");
+    setTimeout(() => setMsg(null), 3000);
+  };
+
+  const handleDeleteFavorite = async (favoriteId: number) => {
+    try {
+      await deleteFavoriteRide(favoriteId);
+      setFavorites(favorites.filter(f => f.id !== favoriteId));
+    } catch (error: any) {
+      console.error("Error deleting favorite:", error);
+      setMsg(error?.message ?? "Error al eliminar el favorito");
     }
   };
 
@@ -261,19 +469,43 @@ export default function PostRidePage() {
         <div className="max-w-4xl mx-auto">
           {/* Header Banner */}
           <div className="bg-gradient-to-r from-orange-500 to-orange-600 rounded-2xl p-8 mb-8 shadow-lg">
-            <div className="flex items-center space-x-4">
-              <div className="w-12 h-12 bg-white rounded-lg flex items-center justify-center shadow-md">
-                <svg className="w-8 h-8 text-orange-500" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
-                  <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1V8a1 1 0 00-1-1h-3z" />
-                </svg>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <div className="w-12 h-12 bg-white rounded-lg flex items-center justify-center shadow-md">
+                  <svg className="w-8 h-8 text-orange-500" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
+                    <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1V8a1 1 0 00-1-1h-3z" />
+                  </svg>
+                </div>
+                <div>
+                  <h1 className="text-3xl font-bold text-white mb-2">Publicar un Nuevo Viaje</h1>
+                  <p className="text-white/90 text-lg">
+                    Comparte tu viaje y divide los costos con otros estudiantes. Revisarás y aprobarás las solicitudes de reserva.
+                  </p>
+                </div>
               </div>
-              <div>
-                <h1 className="text-3xl font-bold text-white mb-2">Publicar un Nuevo Viaje</h1>
-                <p className="text-white/90 text-lg">
-                  Comparte tu viaje y divide los costos con otros estudiantes. Revisarás y aprobarás las solicitudes de reserva.
-                </p>
-              </div>
+              {isLoggedIn && (
+                <div className="flex space-x-3">
+                  <button
+                    onClick={() => setShowFavoritesListModal(true)}
+                    className="bg-white/20 hover:bg-white/30 text-white px-6 py-3 rounded-lg font-medium transition-colors flex items-center space-x-2 backdrop-blur-sm"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                    </svg>
+                    <span>Viajes favoritos</span>
+                  </button>
+                  <button
+                    onClick={() => setShowSaveFavoriteModal(true)}
+                    className="bg-white/20 hover:bg-white/30 text-white px-6 py-3 rounded-lg font-medium transition-colors flex items-center space-x-2 backdrop-blur-sm"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span>Guardar como favorito</span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -538,6 +770,34 @@ export default function PostRidePage() {
           </div>
         </div>
       </div>
+
+      {/* Modals */}
+      <SaveFavoriteModal
+        isOpen={showSaveFavoriteModal}
+        onSave={handleSaveFavorite}
+        onCancel={() => setShowSaveFavoriteModal(false)}
+      />
+
+      <FavoritesListModal
+        isOpen={showFavoritesListModal}
+        favorites={favorites}
+        onSelect={handleSelectFavorite}
+        onCancel={() => {
+          setShowFavoritesListModal(false);
+          setSelectedFavorite(null);
+        }}
+        onDelete={handleDeleteFavorite}
+      />
+
+      <ConfirmFavoriteModal
+        isOpen={showConfirmFavoriteModal}
+        favorite={selectedFavorite}
+        onConfirm={handleConfirmFavorite}
+        onCancel={() => {
+          setShowConfirmFavoriteModal(false);
+          setSelectedFavorite(null);
+        }}
+      />
     </DesktopLayout>
   );
 }
