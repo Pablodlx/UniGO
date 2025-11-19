@@ -129,7 +129,11 @@ export default function RideCard({ ride, onClick }: RideCardProps) {
           </div>
         )}
         <div>
-          <span className="font-medium text-gray-900">Vehículo:</span> {ride.vehicle_info || 'N/A'}
+          <span className="font-medium text-gray-900">Vehículo:</span> {
+            ride.vehicle_brand || ride.vehicle_color 
+              ? [ride.vehicle_brand, ride.vehicle_color].filter(Boolean).join(' ') 
+              : 'N/A'
+          }
         </div>
       </div>
     </div>

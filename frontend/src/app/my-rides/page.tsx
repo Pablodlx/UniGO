@@ -506,7 +506,11 @@ export default function MyRidesPage() {
                               <span className="font-medium text-gray-900">Precio por asiento:</span> {ride.price_per_seat.toFixed(2)} €
                             </div>
                             <div>
-                              <span className="font-medium text-gray-900">Vehículo:</span> {ride.vehicle_info || 'N/A'}
+                              <span className="font-medium text-gray-900">Vehículo:</span> {
+                                ride.vehicle_brand || ride.vehicle_color 
+                                  ? [ride.vehicle_brand, ride.vehicle_color].filter(Boolean).join(' ') 
+                                  : 'N/A'
+                              }
                             </div>
                             {ride.estimated_duration_minutes ? (
                               <div>
@@ -616,13 +620,21 @@ export default function MyRidesPage() {
                               </div>
                             ) : (
                               <div>
-                                <span className="font-medium text-gray-900">Vehículo:</span> {ride.vehicle_info || 'N/A'}
+                                <span className="font-medium text-gray-900">Vehículo:</span> {
+                                ride.vehicle_brand || ride.vehicle_color 
+                                  ? [ride.vehicle_brand, ride.vehicle_color].filter(Boolean).join(' ') 
+                                  : 'N/A'
+                              }
                               </div>
                             )}
                           </div>
                           {ride.estimated_duration_minutes && (
                             <div className="mt-2 text-sm text-gray-600">
-                              <span className="font-medium text-gray-900">Vehículo:</span> {ride.vehicle_info || 'N/A'}
+                              <span className="font-medium text-gray-900">Vehículo:</span> {
+                                ride.vehicle_brand || ride.vehicle_color 
+                                  ? [ride.vehicle_brand, ride.vehicle_color].filter(Boolean).join(' ') 
+                                  : 'N/A'
+                              }
                             </div>
                           )}
                           
@@ -706,7 +718,11 @@ export default function MyRidesPage() {
                               <span className="font-medium text-gray-900">Precio por asiento:</span> {ride.price_per_seat.toFixed(2)} €
                             </div>
                             <div>
-                              <span className="font-medium text-gray-900">Vehículo:</span> {ride.vehicle_info || 'N/A'}
+                              <span className="font-medium text-gray-900">Vehículo:</span> {
+                                ride.vehicle_brand || ride.vehicle_color 
+                                  ? [ride.vehicle_brand, ride.vehicle_color].filter(Boolean).join(' ') 
+                                  : 'N/A'
+                              }
                             </div>
                             {ride.estimated_duration_minutes && (
                               <div>

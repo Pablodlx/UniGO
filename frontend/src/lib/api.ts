@@ -170,7 +170,8 @@ export interface Ride {
   arrival_time?: string; // "HH:MM" format, calculated from departure_time + duration
   available_seats: number;
   price_per_seat: number;
-  vehicle_info?: string;
+  vehicle_brand?: string;
+  vehicle_color?: string;
   additional_details?: string;
   estimated_duration_minutes?: number;
   is_active: boolean;

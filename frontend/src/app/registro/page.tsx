@@ -361,7 +361,11 @@ export default function RegistroPage() {
                       </div>
                       <div className="bg-gray-50 rounded-lg p-3">
                         <div className="text-xs text-gray-500 mb-1">Vehículo</div>
-                        <div className="font-semibold text-gray-900">{ride.vehicle_info || 'N/A'}</div>
+                        <div className="font-semibold text-gray-900">
+                          {ride.vehicle_brand || ride.vehicle_color 
+                            ? [ride.vehicle_brand, ride.vehicle_color].filter(Boolean).join(' ')
+                            : 'N/A'}
+                        </div>
                       </div>
                       {ride.estimated_duration_minutes && (
                         <div className="bg-gray-50 rounded-lg p-3">

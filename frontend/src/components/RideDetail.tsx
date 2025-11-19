@@ -139,7 +139,9 @@ export default function RideDetail({ ride, onBack, onContact, bookingSuccess = f
                       <span>{ride.departure_city}</span>
                     </div>
                     <div className="text-sm text-gray-600">
-                      {ride.vehicle_info || 'Sin detalles adicionales de ubicación'}
+                      {ride.vehicle_brand || ride.vehicle_color 
+                        ? [ride.vehicle_brand, ride.vehicle_color].filter(Boolean).join(' ')
+                        : 'Sin detalles adicionales de ubicación'}
                     </div>
                     {ride.estimated_duration_minutes && (
                       <div className="mt-2 flex items-center space-x-2 text-sm text-orange-600">
@@ -218,7 +220,11 @@ export default function RideDetail({ ride, onBack, onContact, bookingSuccess = f
                 {/* Departure Summary */}
                 <div>
                   <div className="text-lg font-semibold text-gray-900">{formatTime(ride.departure_time)} {ride.departure_city}</div>
-                  <div className="text-sm text-gray-600">{ride.vehicle_info || 'Ubicación de salida'}</div>
+                  <div className="text-sm text-gray-600">
+                    {ride.vehicle_brand || ride.vehicle_color 
+                      ? [ride.vehicle_brand, ride.vehicle_color].filter(Boolean).join(' ')
+                      : 'Ubicación de salida'}
+                  </div>
                   {ride.estimated_duration_minutes && (
                     <div className="mt-2 flex items-center space-x-2 text-sm text-gray-700">
                       <svg className="w-4 h-4 text-orange-500" fill="currentColor" viewBox="0 0 20 20">

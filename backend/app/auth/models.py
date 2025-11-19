@@ -73,7 +73,8 @@ class Ride(Base):
     departure_time: Mapped[str] = mapped_column(String(10), nullable=False)  # "HH:MM" format
     available_seats: Mapped[int] = mapped_column(Integer, nullable=False)
     price_per_seat: Mapped[float] = mapped_column(Float, nullable=False)
-    vehicle_info: Mapped[str] = mapped_column(String(200), nullable=True)
+    vehicle_brand: Mapped[str] = mapped_column(String(100), nullable=True)
+    vehicle_color: Mapped[str] = mapped_column(String(50), nullable=True)
     additional_details: Mapped[str] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

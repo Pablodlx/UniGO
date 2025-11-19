@@ -18,13 +18,72 @@ function getToken() {
   return localStorage.getItem("token");
 }
 
+// --- Car brands and colors ---
+const CAR_BRANDS = [
+  "Abarth",
+  "Aiways",
+  "Alfa Romeo",
+  "Alpine",
+  "Aston Martin",
+  "Audi",
+  "BAIC",
+  "Bentley",
+  "BMW",
+  "BYD",
+  "Citroën",
+  "Cupra",
+  "Dacia",
+  "DS Automobiles",
+  "Fiat",
+  "Ford",
+  "Honda",
+  "Hyundai",
+  "Jeep",
+  "KIA",
+  "Lexus",
+  "Mazda",
+  "Mercedes-Benz",
+  "MG",
+  "MINI",
+  "Mitsubishi",
+  "Nissan",
+  "Opel",
+  "Peugeot",
+  "Renault",
+  "SEAT",
+  "Škoda",
+  "Subaru",
+  "Suzuki",
+  "Tesla",
+  "Toyota",
+  "Volkswagen",
+  "Volvo",
+];
+
+const CAR_COLORS = [
+  "Blanco",
+  "Negro",
+  "Plateado",
+  "Gris",
+  "Azul",
+  "Rojo",
+  "Verde",
+  "Marrón",
+  "Beige",
+  "Amarillo",
+  "Naranja",
+  "Dorado",
+  "Azul Marino",
+];
+
 // --- validación ---
 const schema = z.object({
   departure_date: z.string().min(1, "Fecha de salida es obligatoria"),
   departure_time: z.string().min(1, "Hora de salida es obligatoria"),
   available_seats: z.number().int().min(1, "Mínimo 1 asiento").max(8, "Máximo 8 asientos"),
   price_per_seat: z.number().min(0.01, "Precio debe ser mayor a 0").max(1000, "Precio máximo 1000€"),
-  vehicle_info: z.string().max(200).optional(),
+  vehicle_brand: z.string().optional(),
+  vehicle_color: z.string().optional(),
   additional_details: z.string().max(500).optional(),
 });
 type FormValues = z.infer<typeof schema>;
@@ -49,7 +108,8 @@ export default function PostRidePage() {
       departure_time: "",
       available_seats: 1,
       price_per_seat: 25.00,
-      vehicle_info: "",
+      vehicle_brand: "",
+      vehicle_color: "",
       additional_details: "",
     },
   });
@@ -92,7 +152,8 @@ export default function PostRidePage() {
       departure_time: values.departure_time,
       available_seats: values.available_seats,
       price_per_seat: values.price_per_seat,
-      vehicle_info: values.vehicle_info,
+      vehicle_brand: values.vehicle_brand,
+      vehicle_color: values.vehicle_color,
       additional_details: values.additional_details,
     };
     
@@ -358,24 +419,73 @@ export default function PostRidePage() {
 
               {/* Full Width Fields */}
               {/* Vehicle Information */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-3">
-                  <div className="flex items-center space-x-2">
-                    <svg className="w-4 h-4 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
-                      <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
-                      <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1V8a1 1 0 00-1-1h-3z" />
-                    </svg>
-                    <span>Información del Vehículo</span>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Vehicle Brand */}
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-3">
+                    <div className="flex items-center space-x-2">
+                      <svg className="w-4 h-4 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
+                        <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1V8a1 1 0 00-1-1h-3z" />
+                      </svg>
+                      <span>Marca del Vehículo</span>
+                    </div>
+                  </label>
+                  <div className="relative">
+                    <select
+                      {...register("vehicle_brand")}
+                      className="w-full px-4 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-lg font-medium appearance-none bg-white"
+                    >
+                      <option value="">Selecciona una marca</option>
+                      {CAR_BRANDS.map((brand) => (
+                        <option key={brand} value={brand}>
+                          {brand}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none">
+                      <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                    </div>
                   </div>
-                </label>
-                <input
-                  {...register("vehicle_info")}
-                  className="w-full px-4 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-lg font-medium"
-                  placeholder="Ej. Renault Clio 2020, Azul"
-                />
-                {errors.vehicle_info && (
-                  <p className="text-red-500 text-sm mt-2">{errors.vehicle_info.message}</p>
-                )}
+                  {errors.vehicle_brand && (
+                    <p className="text-red-500 text-sm mt-2">{errors.vehicle_brand.message}</p>
+                  )}
+                </div>
+
+                {/* Vehicle Color */}
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-3">
+                    <div className="flex items-center space-x-2">
+                      <svg className="w-4 h-4 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M4 2a2 2 0 00-2 2v11a3 3 0 106 0V4a2 2 0 00-2-2H4z" clipRule="evenodd" />
+                      </svg>
+                      <span>Color del Vehículo</span>
+                    </div>
+                  </label>
+                  <div className="relative">
+                    <select
+                      {...register("vehicle_color")}
+                      className="w-full px-4 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-lg font-medium appearance-none bg-white"
+                    >
+                      <option value="">Selecciona un color</option>
+                      {CAR_COLORS.map((color) => (
+                        <option key={color} value={color}>
+                          {color}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none">
+                      <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                  </div>
+                  {errors.vehicle_color && (
+                    <p className="text-red-500 text-sm mt-2">{errors.vehicle_color.message}</p>
+                  )}
+                </div>
               </div>
 
               {/* Additional Details */}

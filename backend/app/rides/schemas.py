@@ -11,7 +11,8 @@ class RideBase(BaseModel):
     departure_time: str = Field(..., pattern=r"^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$")  # HH:MM format
     available_seats: int = Field(..., ge=0, le=8)
     price_per_seat: float = Field(..., gt=0, le=1000)
-    vehicle_info: Optional[str] = Field(None, max_length=200)
+    vehicle_brand: Optional[str] = Field(None, max_length=100)
+    vehicle_color: Optional[str] = Field(None, max_length=50)
     additional_details: Optional[str] = Field(None, max_length=500)
 
 
