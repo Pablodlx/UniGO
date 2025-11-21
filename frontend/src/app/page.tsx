@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from "react";
 import DesktopLayout from "@/components/DesktopLayout";
-import { getToken, Ride } from "@/lib/api";
+import { getToken, Ride, getProfile } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import RideCard from "@/components/RideCard";
 import RideDetail from "@/components/RideDetail";
 import AddressAutocomplete, { AddressValue } from "@/components/AddressAutocomplete";
+import { addToSearchHistory } from "@/utils/searchHistory";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000/api";
 
@@ -25,6 +26,8 @@ export default function Home() {
   const [toAddress, setToAddress] = useState<AddressValue | null>(null);
   const [fromError, setFromError] = useState<string>("");
   const [toError, setToError] = useState<string>("");
+  const [userUniversity, setUserUniversity] = useState<string | null>(null);
+  const [userHomeAddress, setUserHomeAddress] = useState<AddressValue | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -32,11 +35,33 @@ export default function Home() {
     const token = getToken();
     setIsLoggedIn(!!token);
     
-    // Fetch current user ID if logged in
+    // Fetch current user ID and profile if logged in
     if (token) {
       fetchCurrentUserId();
+      fetchUserProfile();
     }
   }, []);
+
+  const fetchUserProfile = async () => {
+    try {
+      const profile = await getProfile();
+      if (profile?.university) {
+        setUserUniversity(profile.university);
+      }
+      if (profile?.home_address) {
+        const addressValue: AddressValue = {
+          formattedAddress: profile.home_address.formatted_address,
+          placeId: profile.home_address.place_id,
+          lat: profile.home_address.lat,
+          lng: profile.home_address.lng,
+        };
+        setUserHomeAddress(addressValue);
+      }
+    } catch (error) {
+      console.error("Error fetching user profile:", error);
+      // Don't show error to user, just continue without recommendations
+    }
+  };
 
   const fetchCurrentUserId = async () => {
     try {
@@ -105,7 +130,7 @@ export default function Home() {
       console.log("Search results before filtering:", rides);
       
       const filteredRides = currentUserId 
-        ? rides.filter(ride => {
+        ? rides.filter((ride: Ride) => {
             const shouldShow = ride.driver_id !== currentUserId;
             console.log(`Ride ${ride.id}: driver_id=${ride.driver_id}, shouldShow=${shouldShow}`);
             return shouldShow;
@@ -116,12 +141,32 @@ export default function Home() {
       setSearchResults(filteredRides);
       setSearchParams({ from: fromAddress, to: toAddress, date });
       
-    } catch (error) {
+      // Save search history
+      if (fromAddress?.formattedAddress) {
+        addToSearchHistory(
+          fromAddress.formattedAddress,
+          'departure',
+          fromAddress.placeId,
+          fromAddress.lat,
+          fromAddress.lng
+        );
+      }
+      if (toAddress?.formattedAddress) {
+        addToSearchHistory(
+          toAddress.formattedAddress,
+          'destination',
+          toAddress.placeId,
+          toAddress.lat,
+          toAddress.lng
+        );
+      }
+      
+    } catch (error: any) {
       console.error("Search error:", error);
-      if (error.message.includes("Failed to fetch")) {
+      if (error?.message?.includes("Failed to fetch")) {
         alert("Cannot connect to the server. Please make sure the backend is running.\n\nRun: make backend");
       } else {
-        alert(`Error searching rides: ${error.message}`);
+        alert(`Error searching rides: ${error?.message || "Unknown error"}`);
       }
     }
   };
@@ -283,6 +328,9 @@ export default function Home() {
                   error={fromError}
                   showVerifiedBadge={false}
                   className="w-full"
+                  university={userUniversity}
+                  homeAddress={userHomeAddress}
+                  fieldType="departure"
                 />
               </div>
 
@@ -300,6 +348,9 @@ export default function Home() {
                   error={toError}
                   showVerifiedBadge={false}
                   className="w-full"
+                  university={userUniversity}
+                  homeAddress={userHomeAddress}
+                  fieldType="destination"
                 />
               </div>
 

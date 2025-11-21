@@ -25,7 +25,10 @@ class User(Base):
     university = Column(String(150), nullable=True)
     degree = Column(String(150), nullable=True)
     course = Column(Integer, nullable=True)
-    ride_intent = Column(Enum(RideIntent), nullable=True)
+    home_address_formatted = Column(String(500), nullable=True)
+    home_address_place_id = Column(String(255), nullable=True)
+    home_address_lat = Column(Float, nullable=True)
+    home_address_lng = Column(Float, nullable=True)
     avatar_url = Column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False

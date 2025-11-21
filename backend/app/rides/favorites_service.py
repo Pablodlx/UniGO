@@ -90,3 +90,5 @@ def delete_favorite_ride(db: Session, favorite_id: int, user_id: int) -> bool:
     db.commit()
     return True
 
+
+

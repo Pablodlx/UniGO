@@ -11,9 +11,114 @@ from app.core.config import settings
 from app.core.security import create_access_token, hash_password, verify_password
 
 
+# Mapping of email domains to university names
+EMAIL_DOMAIN_TO_UNIVERSITY = {
+    "ual.es": "Universidad de Almería",
+    "uca.es": "Universidad de Cádiz",
+    "uco.es": "Universidad de Córdoba",
+    "ugr.es": "Universidad de Granada",
+    "uhu.es": "Universidad de Huelva",
+    "us.es": "Universidad de Sevilla",
+    "uma.es": "Universidad de Málaga",
+    "ujaen.es": "Universidad de Jaén",
+    "unia.es": "Universidad Internacional de Andalucía",
+    "ua.es": "Universidad de Alicante",
+    "uji.es": "Universitat Jaume I (Castellón)",
+    "umh.es": "Universidad Miguel Hernández de Elche",
+    "uv.es": "Universitat de València",
+    "upv.es": "Universitat Politècnica de València",
+    "uam.es": "Universidad Autónoma de Madrid",
+    "ucm.es": "Universidad Complutense de Madrid",
+    "upm.es": "Universidad Politécnica de Madrid",
+    "uc3m.es": "Universidad Carlos III de Madrid",
+    "urjc.es": "Universidad Rey Juan Carlos",
+    "uah.es": "Universidad de Alcalá",
+    "usal.es": "Universidad de Salamanca",
+    "uva.es": "Universidad de Valladolid",
+    "ubu.es": "Universidad de Burgos",
+    "unileon.es": "Universidad de León",
+    "unican.es": "Universidad de Cantabria",
+    "uniovi.es": "Universidad de Oviedo",
+    "uex.es": "Universidad de Extremadura",
+    "uclm.es": "Universidad de Castilla-La Mancha",
+    "unizar.es": "Universidad de Zaragoza",
+    "ull.es": "Universidad de La Laguna",
+    "ulpgc.es": "Universidad de Las Palmas de Gran Canaria",
+    "uib.es": "Universitat de les Illes Balears",
+    "um.es": "Universidad de Murcia",
+    "ucam.edu": "Universidad Católica San Antonio de Murcia (UCAM)",
+    "upct.es": "Universidad Politécnica de Cartagena",
+    "upna.es": "Universidad Pública de Navarra",
+    "unavarra.es": "Universidad Pública de Navarra",
+    "ehu.eus": "Universidad del País Vasco (UPV/EHU)",
+    "deusto.es": "Universidad de Deusto",
+    "mondragon.edu": "Mondragón Unibertsitatea",
+    "ub.edu": "Universitat de Barcelona",
+    "uab.cat": "Universitat Autònoma de Barcelona",
+    "upc.edu": "Universitat Politècnica de Catalunya",
+    "upf.edu": "Universitat Pompeu Fabra",
+    "urv.cat": "Universitat Rovira i Virgili",
+    "udl.cat": "Universitat de Lleida",
+    "uvic.cat": "Universitat de Vic – Universitat Central de Catalunya",
+    "uoc.edu": "Universitat Oberta de Catalunya",
+    "unav.edu": "Universidad de Navarra",
+    "cunef.edu": "CUNEF Universidad",
+    "comillas.edu": "Universidad Pontificia Comillas",
+    "ceu.es": "Fundación Universitaria San Pablo CEU",
+    "uax.es": "Universidad Alfonso X el Sabio",
+    "ufv.es": "Universidad Francisco de Vitoria",
+    "nebrija.es": "Universidad Nebrija",
+    "uic.es": "Universitat Internacional de Catalunya",
+    "unir.net": "Universidad Internacional de La Rioja",
+    "ui1.es": "Universidad Isabel I",
+    "viu.es": "Universidad Internacional de Valencia",
+    "esade.edu": "ESADE",
+    "esic.edu": "ESIC Universidad",
+}
+
+
 def _extract_domain(email: str) -> str:
     # "user@alumnos.ugr.es" -> "alumnos.ugr.es"
     return email.split("@", 1)[1].lower()
+
+
+def _get_base_domain(domain: str) -> str:
+    """
+    Extract base domain from a subdomain.
+    Examples:
+    - "alumnos.ugr.es" -> "ugr.es"
+    - "ugr.es" -> "ugr.es"
+    - "mail.unizar.es" -> "unizar.es"
+    """
+    parts = domain.split(".")
+    # Take last two parts for .es, .edu, .cat, .eus domains
+    if len(parts) >= 2:
+        return ".".join(parts[-2:])
+    return domain
+
+
+def _detect_university_from_email(email: str) -> str | None:
+    """
+    Detect university name from email domain.
+    Returns the university name or None if not found.
+    """
+    domain = _extract_domain(email)
+    base_domain = _get_base_domain(domain)
+    
+    # Try exact match first
+    if base_domain in EMAIL_DOMAIN_TO_UNIVERSITY:
+        return EMAIL_DOMAIN_TO_UNIVERSITY[base_domain]
+    
+    # Try full domain match (for subdomains)
+    if domain in EMAIL_DOMAIN_TO_UNIVERSITY:
+        return EMAIL_DOMAIN_TO_UNIVERSITY[domain]
+    
+    # Try partial match for subdomains (e.g., "alumnos.ugr.es" -> check "ugr.es")
+    for allowed_domain, university in EMAIL_DOMAIN_TO_UNIVERSITY.items():
+        if domain.endswith(f".{allowed_domain}") or domain == allowed_domain:
+            return university
+    
+    return None
 
 
 def _is_allowed_domain(domain: str) -> bool:
@@ -55,12 +160,22 @@ def register(db: Session, data: UserCreate) -> str:
         )
 
     try:
-        user = User(email=data.email, password_hash=hash_password(data.password))
+        # Detect university from email domain
+        university = _detect_university_from_email(data.email)
+        
+        user = User(
+            email=data.email,
+            password_hash=hash_password(data.password),
+            university=university
+        )
         
         # Auto-verify users if enabled in development mode
         if settings.auto_verify_users:
             user.is_verified = True
             print(f"[UniGo] Auto-verified user {data.email} (development mode)")
+        
+        if university:
+            print(f"[UniGo] Universidad detectada para {data.email}: {university}")
         
         db.add(user)
         db.commit()
@@ -77,7 +192,10 @@ def register(db: Session, data: UserCreate) -> str:
         raise HTTPException(status_code=500, detail="DB error durante el registro") from err
 
 
-def verify_email(db: Session, email: str, code: str) -> None:
+def verify_email(db: Session, email: str, code: str) -> str:
+    """
+    Verifica el email con el código y devuelve un JWT token para auto-login.
+    """
     rec = (
         db.query(EmailCode)
         .filter(
@@ -108,6 +226,10 @@ def verify_email(db: Session, email: str, code: str) -> None:
 
     user.is_verified = True
     db.commit()
+    
+    # Generate and return JWT token for auto-login
+    token = create_access_token(sub=str(user.id))
+    return token
 
 
 def login(db: Session, email: str, password: str) -> str:

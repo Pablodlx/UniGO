@@ -102,21 +102,30 @@ export async function register(email: string, password: string): Promise<void> {
 }
 
 // --- Auth: verify email ---
-export async function verifyEmail(email: string, code: string): Promise<void> {
-  await fetchJson<void>(`${BASE}/auth/verify`, {
+export async function verifyEmail(email: string, code: string): Promise<string> {
+  const data = await fetchJson<LoginResponse>(`${BASE}/auth/verify`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, code }),
   });
+  const tok = data.access_token ?? (data.token as string | undefined);
+  if (!tok) throw new Error("Token no recibido del backend");
+  setToken(tok);
+  return tok;
 }
 
 // --- Perfil ---
 export type ProfilePayload = {
   full_name: string;
-  university: string;
+  university?: string; // Auto-detected from email, not required in updates
   degree: string;
   course: number;
-  ride_intent: "offers" | "seeks" | "both";
+  home_address: {
+    formatted_address: string;
+    place_id: string;
+    lat: number;
+    lng: number;
+  } | null;
 };
 
 export async function getProfile() {
@@ -152,7 +161,9 @@ export function isProfileComplete(p: any): boolean {
       p.degree &&
       typeof p.course === "number" &&
       p.course >= 1 &&
-      p.ride_intent
+      p.home_address &&
+      p.home_address.formatted_address &&
+      p.home_address.place_id
   );
 }
 

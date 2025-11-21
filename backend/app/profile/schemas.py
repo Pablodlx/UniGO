@@ -2,7 +2,12 @@ from typing import Literal
 
 from pydantic import BaseModel, HttpUrl, conint, constr, model_validator
 
-RideIntent = Literal["offers", "seeks", "both"]
+
+class HomeAddress(BaseModel):
+    formatted_address: str
+    place_id: str
+    lat: float
+    lng: float
 
 
 class ProfileBase(BaseModel):
@@ -11,17 +16,21 @@ class ProfileBase(BaseModel):
     university: constr(strip_whitespace=True, max_length=150) | None = None
     degree: constr(strip_whitespace=True, max_length=150) | None = None
     course: conint(ge=1, le=6) | None = None
-    ride_intent: RideIntent | None = None
+    home_address: HomeAddress | None = None
 
     # Opcional
     avatar_url: HttpUrl | str | None = None
 
 
 class ProfileUpdate(ProfileBase):
+    # University is auto-detected from email, so it's not part of the update schema
+    university: None = None  # Always None, cannot be updated
+    
     # Pydantic v2: validator de modelo "after" (antes llamado root_validator)
     @model_validator(mode="after")
     def _rf02_required(self) -> "ProfileUpdate":
-        required = ["full_name", "university", "degree", "course", "ride_intent"]
+        # University is not required in updates since it's auto-detected
+        required = ["full_name", "degree", "course", "home_address"]
         missing = [k for k in required if getattr(self, k) in (None, "", 0)]
         if missing:
             # Lanzamos ValueError para que Pydantic lo reporte como error de validación

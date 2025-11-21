@@ -35,13 +35,18 @@ def test_accept_complete(auth_client):
         "university": "Uni",
         "degree": "Ing",
         "course": 3,
-        "ride_intent": "both",
+        "home_address": {
+            "formatted_address": "Calle Gran Vía, 1, Madrid, Spain",
+            "place_id": "ChIJ123456789",
+            "lat": 40.4168,
+            "lng": -3.7038,
+        },
     }
     r = auth_client.put("/me/profile", json=payload)
     assert r.status_code == 200
     j = r.json()
     assert j["full_name"] == "Ada Lovelace"
-    assert j["ride_intent"] == "both"
+    assert j["home_address"]["formatted_address"] == "Calle Gran Vía, 1, Madrid, Spain"
     assert j["course"] == 3
 
 

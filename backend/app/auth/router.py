@@ -35,13 +35,13 @@ def register_user(
     return Response(status_code=204)
 
 
-@router.post("/verify", status_code=204)
-def verify_user(payload: VerifyEmail, db: Session = Depends(get_db)) -> Response:
+@router.post("/verify", response_model=Token)
+def verify_user(payload: VerifyEmail, db: Session = Depends(get_db)) -> Token:
     """
-    Verifica el email con el código recibido.
+    Verifica el email con el código recibido y devuelve un JWT token para auto-login.
     """
-    service.verify_email(db, payload.email, payload.code)
-    return Response(status_code=204)
+    token = service.verify_email(db, payload.email, payload.code)
+    return {"access_token": token, "token_type": "bearer"}
 
 
 @router.post("/login", response_model=Token)

@@ -56,3 +56,4 @@ def downgrade():
             op.drop_column('rides', 'vehicle_color')
 
 
+

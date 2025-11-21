@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { loadGoogleMaps } from "@/utils/googleMapsLoader";
+import { getSearchHistoryByField, SearchHistoryItem } from "@/utils/searchHistory";
 
 export type AddressValue = {
   formattedAddress: string;
@@ -22,6 +23,9 @@ interface AddressAutocompleteProps {
   className?: string;
   error?: string;
   showVerifiedBadge?: boolean;
+  university?: string | null;
+  homeAddress?: AddressValue | null;
+  fieldType?: 'departure' | 'destination';
 }
 
 interface Prediction {
@@ -31,6 +35,16 @@ interface Prediction {
     main_text: string;
     secondary_text: string;
   };
+}
+
+interface Recommendation {
+  address: string;
+  placeId?: string;
+  lat?: number;
+  lng?: number;
+  isRecent?: boolean;
+  isUniversity?: boolean;
+  isHomeAddress?: boolean;
 }
 
 export default function AddressAutocomplete({
@@ -44,6 +58,9 @@ export default function AddressAutocomplete({
   className = "",
   error,
   showVerifiedBadge = true,
+  university,
+  homeAddress,
+  fieldType,
 }: AddressAutocompleteProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -57,9 +74,11 @@ export default function AddressAutocomplete({
   const [value, setValue] = useState<AddressValue | null>(initialValue || null);
   const [inputText, setInputText] = useState(initialValue?.formattedAddress || "");
   const [predictions, setPredictions] = useState<Prediction[]>([]);
+  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isFetching, setIsFetching] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [showRecommendations, setShowRecommendations] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [hasBlurred, setHasBlurred] = useState(false);
   const [isValid, setIsValid] = useState(!!initialValue?.placeId);
@@ -162,11 +181,214 @@ export default function AddressAutocomplete({
     }
   }, [initialValue]);
 
+  // Helper function to check if two addresses match (by placeId or address similarity)
+  const addressesMatch = (addr1: { placeId?: string; address: string }, addr2: { placeId?: string; address: string }): boolean => {
+    // First check by placeId if both have it (most reliable)
+    if (addr1.placeId && addr2.placeId && addr1.placeId === addr2.placeId) {
+      return true;
+    }
+    
+    // Normalize addresses for comparison
+    const normalize = (str: string) => {
+      return str
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, ' ')
+        .replace(/^calle\s+de\s+/i, '') // Remove "Calle de " prefix
+        .replace(/^calle\s+/i, '') // Remove "Calle " prefix
+        .replace(/^avenida\s+/i, '') // Remove "Avenida " prefix
+        .replace(/^av\.\s+/i, '') // Remove "Av. " prefix
+        .replace(/^avd\.\s+/i, '') // Remove "Avd. " prefix
+        .replace(/,\s*/g, ' ') // Remove commas
+        .trim();
+    };
+    
+    const normalized1 = normalize(addr1.address);
+    const normalized2 = normalize(addr2.address);
+    
+    // Exact match after normalization
+    if (normalized1 === normalized2) {
+      return true;
+    }
+    
+    // Check if one contains the other (for cases like "Julio Palacios" vs "Calle de Julio Palacios")
+    if (normalized1.includes(normalized2) || normalized2.includes(normalized1)) {
+      // Only consider it a match if the shorter string is at least 5 characters
+      const shorter = normalized1.length < normalized2.length ? normalized1 : normalized2;
+      if (shorter.length >= 5) {
+        return true;
+      }
+    }
+    
+    return false;
+  };
+
+  // Cache university placeId to avoid repeated API calls
+  const universityCacheRef = useRef<{ placeId: string; address: string; timestamp: number } | null>(null);
+  const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+  // Get recommendations: 1) Search history, 2) Home address, 3) University (max 4 total)
+  // Smart deduplication: if search history matches home/university, show with correct icon
+  const getRecommendations = useCallback(async (): Promise<Recommendation[]> => {
+    const recs: Recommendation[] = [];
+    const MAX_RECOMMENDATIONS = 4;
+    
+    // Check cache first for university
+    let universityPlaceId: string | undefined;
+    let universityAddress: string | undefined;
+    const now = Date.now();
+    
+    if (universityCacheRef.current && (now - universityCacheRef.current.timestamp) < CACHE_DURATION) {
+      // Use cached value
+      universityPlaceId = universityCacheRef.current.placeId;
+      universityAddress = universityCacheRef.current.address;
+    } else if (university && fieldType && autocompleteServiceRef.current && isApiReady) {
+      // Fetch university placeId (async, but don't block)
+      try {
+        const request: google.maps.places.AutocompletionRequest = {
+          input: university,
+          types: ["university"],
+          language: "es",
+          region: "es",
+        };
+
+        if (restrictions.country && restrictions.country.length > 0) {
+          request.componentRestrictions = { country: restrictions.country };
+        }
+
+        // Don't await - let it run in background and update cache
+        autocompleteServiceRef.current.getPlacePredictions(
+          request,
+          (results, status) => {
+            if (status === window.google.maps.places.PlacesServiceStatus.OK && results && results.length > 0) {
+              universityCacheRef.current = {
+                placeId: results[0].place_id,
+                address: results[0].structured_formatting.main_text,
+                timestamp: now,
+              };
+            }
+          }
+        );
+      } catch (error) {
+        console.error("Error fetching university placeId:", error);
+      }
+    }
+    
+    // Track which addresses we've already added to avoid duplicates
+    const addedAddresses = new Set<string>();
+    const addAddress = (rec: Recommendation) => {
+      const key = rec.placeId || rec.address.toLowerCase();
+      if (!addedAddresses.has(key) && recs.length < MAX_RECOMMENDATIONS) {
+        addedAddresses.add(key);
+        recs.push(rec);
+      }
+    };
+    
+    // Track which addresses we've matched to avoid duplicates
+    let homeAddressMatched = false;
+    let universityMatched = false;
+    
+    // 1. First: Process search history and check for matches with home/university
+    if (fieldType) {
+      const recentSearches = getSearchHistoryByField(fieldType);
+      recentSearches.slice(0, MAX_RECOMMENDATIONS).forEach(item => {
+        if (recs.length >= MAX_RECOMMENDATIONS) return;
+        
+        let matched = false;
+        
+        // Check if this search history item matches home address
+        if (homeAddress && !homeAddressMatched && addressesMatch(
+          { placeId: item.placeId, address: item.address },
+          { placeId: homeAddress.placeId, address: homeAddress.formattedAddress }
+        )) {
+          // Use home address version (more complete) instead of search history version
+          addAddress({
+            address: homeAddress.formattedAddress, // Use the home address text
+            placeId: homeAddress.placeId || item.placeId,
+            lat: homeAddress.lat || item.lat,
+            lng: homeAddress.lng || item.lng,
+            isHomeAddress: true, // Show with home icon
+          });
+          homeAddressMatched = true;
+          matched = true;
+        }
+        
+        // Check if this search history item matches university
+        if (!matched && universityPlaceId && universityAddress && !universityMatched && addressesMatch(
+          { placeId: item.placeId, address: item.address },
+          { placeId: universityPlaceId, address: universityAddress }
+        )) {
+          // Use university version instead of search history version
+          addAddress({
+            address: universityAddress, // Use the university address text
+            placeId: universityPlaceId || item.placeId,
+            lat: item.lat,
+            lng: item.lng,
+            isUniversity: true, // Show with university icon
+          });
+          universityMatched = true;
+          matched = true;
+        }
+        
+        // Otherwise, add as recent search (only if not matched)
+        if (!matched) {
+          addAddress({
+            address: item.address,
+            placeId: item.placeId,
+            lat: item.lat,
+            lng: item.lng,
+            isRecent: true,
+          });
+        }
+      });
+    }
+    
+    // 2. Second: Add home address if not already matched in search history
+    if (homeAddress && !homeAddressMatched && recs.length < MAX_RECOMMENDATIONS) {
+      const key = homeAddress.placeId || homeAddress.formattedAddress.toLowerCase();
+      if (!addedAddresses.has(key)) {
+        addAddress({
+          address: homeAddress.formattedAddress,
+          placeId: homeAddress.placeId,
+          lat: homeAddress.lat,
+          lng: homeAddress.lng,
+          isHomeAddress: true,
+        });
+      }
+    }
+    
+    // 3. Third: Add university if not already matched in search history
+    if (university && fieldType && !universityMatched && recs.length < MAX_RECOMMENDATIONS) {
+      if (universityPlaceId && universityAddress) {
+        const key = universityPlaceId || universityAddress.toLowerCase();
+        if (!addedAddresses.has(key)) {
+          addAddress({
+            address: universityAddress,
+            placeId: universityPlaceId,
+            isUniversity: true,
+          });
+        }
+      } else {
+        // Fallback: if API not ready or failed, add simple text recommendation
+        const key = university.toLowerCase();
+        if (!addedAddresses.has(key)) {
+          addAddress({
+            address: university,
+            isUniversity: true,
+          });
+        }
+      }
+    }
+    
+    return recs.slice(0, MAX_RECOMMENDATIONS); // Return max 4 recommendations
+  }, [homeAddress, university, fieldType, restrictions.country, isApiReady]);
+
   // Fetch predictions
   const fetchPredictions = useCallback((input: string) => {
     if (!input.trim()) {
       setPredictions([]);
       setShowDropdown(false);
+      setShowRecommendations(false);
       return;
     }
 
@@ -225,6 +447,7 @@ export default function AddressAutocomplete({
             setApiErrorStatus(null); // CRITICAL: Clear error status immediately
             setIsApiReady(true); // Mark API as ready
             setPredictions(results); // Set predictions
+            setShowRecommendations(false); // Hide recommendations when showing predictions
             // Always show dropdown if we have results
             if (results.length > 0) {
               setShowDropdown(true);
@@ -305,9 +528,11 @@ export default function AddressAutocomplete({
       timeoutRef.current = setTimeout(() => {
         fetchPredictions(newValue);
       }, 300);
+      setShowRecommendations(false); // Hide recommendations when typing
     } else {
       setPredictions([]);
       setShowDropdown(false);
+      setShowRecommendations(false);
       setApiErrorStatus(null);
     }
   };
@@ -392,9 +617,41 @@ export default function AddressAutocomplete({
     getPlaceDetails(prediction.place_id);
   }, [getPlaceDetails]);
 
+  // Handle recommendation selection
+  const handleSelectRecommendation = useCallback((recommendation: Recommendation) => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+    }
+    
+    // If recommendation has placeId, use it directly
+    if (recommendation.placeId) {
+      getPlaceDetails(recommendation.placeId);
+    } else if (recommendation.lat && recommendation.lng) {
+      // If we have coordinates, create address value directly
+      const addressValue: AddressValue = {
+        formattedAddress: recommendation.address,
+        placeId: recommendation.placeId || '',
+        lat: recommendation.lat,
+        lng: recommendation.lng,
+      };
+      setValue(addressValue);
+      setInputText(addressValue.formattedAddress);
+      setIsValid(true);
+      setShowDropdown(false);
+      setShowRecommendations(false);
+      setHasBlurred(false);
+      onChange(addressValue);
+    } else {
+      // Search for the recommendation address
+      fetchPredictions(recommendation.address);
+    }
+  }, [getPlaceDetails, fetchPredictions, onChange]);
+
   // Handle keyboard navigation
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (!showDropdown || predictions.length === 0) {
+    const totalItems = showRecommendations ? recommendations.length : predictions.length;
+    
+    if (!showDropdown || totalItems === 0) {
       if (e.key === "Enter") {
         e.preventDefault();
         // If required and no value, show error
@@ -409,7 +666,7 @@ export default function AddressAutocomplete({
       case "ArrowDown":
         e.preventDefault();
         setSelectedIndex((prev) => 
-          prev < predictions.length - 1 ? prev + 1 : prev
+          prev < totalItems - 1 ? prev + 1 : prev
         );
         break;
       case "ArrowUp":
@@ -418,12 +675,17 @@ export default function AddressAutocomplete({
         break;
       case "Enter":
         e.preventDefault();
-        if (selectedIndex >= 0 && selectedIndex < predictions.length) {
-          handleSelectPrediction(predictions[selectedIndex]);
+        if (selectedIndex >= 0 && selectedIndex < totalItems) {
+          if (showRecommendations) {
+            handleSelectRecommendation(recommendations[selectedIndex]);
+          } else {
+            handleSelectPrediction(predictions[selectedIndex]);
+          }
         }
         break;
       case "Escape":
         setShowDropdown(false);
+        setShowRecommendations(false);
         setSelectedIndex(-1);
         break;
     }
@@ -437,10 +699,107 @@ export default function AddressAutocomplete({
       blurTimeoutRef.current = null;
     }
 
-    if (inputText && predictions.length > 0) {
-      setShowDropdown(true);
-    } else if (inputText && inputText.trim().length > 0) {
-      fetchPredictions(inputText);
+    if (inputText && inputText.trim().length > 0) {
+      // User has typed something, show predictions
+      if (predictions.length > 0) {
+        setShowDropdown(true);
+        setShowRecommendations(false);
+      } else {
+        fetchPredictions(inputText);
+        setShowRecommendations(false);
+      }
+    } else {
+      // Empty field - show recommendations immediately (synchronous first, then update async)
+      // Build immediate recommendations without waiting for university API call
+      const immediateRecs: Recommendation[] = [];
+      const addedAddresses = new Set<string>();
+      const MAX_RECOMMENDATIONS = 4;
+      
+      // Helper to add address
+      const addAddress = (rec: Recommendation) => {
+        const key = rec.placeId || rec.address.toLowerCase();
+        if (!addedAddresses.has(key) && immediateRecs.length < MAX_RECOMMENDATIONS) {
+          addedAddresses.add(key);
+          immediateRecs.push(rec);
+        }
+      };
+      
+      // 1. Add search history first (check for home/university matches)
+      if (fieldType) {
+        const recentSearches = getSearchHistoryByField(fieldType);
+        recentSearches.slice(0, MAX_RECOMMENDATIONS).forEach(item => {
+          if (immediateRecs.length >= MAX_RECOMMENDATIONS) return;
+          
+          // Check if matches home address (simple check - use placeId or address contains)
+          if (homeAddress) {
+            const matches = (item.placeId && homeAddress.placeId && item.placeId === homeAddress.placeId) ||
+              item.address.toLowerCase().includes(homeAddress.formattedAddress.toLowerCase().replace(/^calle\s+de\s+/i, '').replace(/^calle\s+/i, '')) ||
+              homeAddress.formattedAddress.toLowerCase().includes(item.address.toLowerCase());
+            
+            if (matches) {
+              addAddress({
+                address: homeAddress.formattedAddress,
+                placeId: homeAddress.placeId || item.placeId,
+                lat: homeAddress.lat || item.lat,
+                lng: homeAddress.lng || item.lng,
+                isHomeAddress: true,
+              });
+              return;
+            }
+          }
+          
+          // Otherwise add as recent
+          addAddress({
+            address: item.address,
+            placeId: item.placeId,
+            lat: item.lat,
+            lng: item.lng,
+            isRecent: true,
+          });
+        });
+      }
+      
+      // 2. Add home address if not already added
+      if (homeAddress && immediateRecs.length < MAX_RECOMMENDATIONS) {
+        const key = homeAddress.placeId || homeAddress.formattedAddress.toLowerCase();
+        if (!addedAddresses.has(key)) {
+          addAddress({
+            address: homeAddress.formattedAddress,
+            placeId: homeAddress.placeId,
+            lat: homeAddress.lat,
+            lng: homeAddress.lng,
+            isHomeAddress: true,
+          });
+        }
+      }
+      
+      // 3. Add university as fallback (will be updated with proper lookup)
+      if (university && immediateRecs.length < MAX_RECOMMENDATIONS) {
+        const key = university.toLowerCase();
+        if (!addedAddresses.has(key)) {
+          addAddress({
+            address: university,
+            isUniversity: true,
+          });
+        }
+      }
+      
+      // Show immediate recommendations right away
+      if (immediateRecs.length > 0) {
+        setRecommendations(immediateRecs);
+        setShowRecommendations(true);
+        setShowDropdown(true);
+        setSelectedIndex(-1);
+      }
+      
+      // Then fetch full recommendations (with proper university lookup) and update
+      getRecommendations().then(recs => {
+        if (recs.length > 0) {
+          setRecommendations(recs);
+          setShowRecommendations(true);
+          setShowDropdown(true);
+        }
+      });
     }
   };
 
@@ -468,6 +827,7 @@ export default function AddressAutocomplete({
       
       // Focus moved outside, hide dropdown
       setShowDropdown(false);
+      setShowRecommendations(false);
       setHasBlurred(true);
       
       // Validate if input matches selected value
@@ -489,7 +849,99 @@ export default function AddressAutocomplete({
       onChange(null);
       setHasBlurred(false);
       setPredictions([]);
-      setShowDropdown(false);
+      setShowRecommendations(false);
+      
+      // Show recommendations immediately (synchronous first, then update async)
+      const immediateRecs: Recommendation[] = [];
+      const addedAddresses = new Set<string>();
+      const MAX_RECOMMENDATIONS = 4;
+      
+      const addAddress = (rec: Recommendation) => {
+        const key = rec.placeId || rec.address.toLowerCase();
+        if (!addedAddresses.has(key) && immediateRecs.length < MAX_RECOMMENDATIONS) {
+          addedAddresses.add(key);
+          immediateRecs.push(rec);
+        }
+      };
+      
+      // 1. Add search history first
+      if (fieldType) {
+        const recentSearches = getSearchHistoryByField(fieldType);
+        recentSearches.slice(0, MAX_RECOMMENDATIONS).forEach(item => {
+          if (immediateRecs.length >= MAX_RECOMMENDATIONS) return;
+          
+          // Check if matches home address
+          if (homeAddress) {
+            const matches = (item.placeId && homeAddress.placeId && item.placeId === homeAddress.placeId) ||
+              item.address.toLowerCase().includes(homeAddress.formattedAddress.toLowerCase().replace(/^calle\s+de\s+/i, '').replace(/^calle\s+/i, '')) ||
+              homeAddress.formattedAddress.toLowerCase().includes(item.address.toLowerCase());
+            
+            if (matches) {
+              addAddress({
+                address: homeAddress.formattedAddress,
+                placeId: homeAddress.placeId || item.placeId,
+                lat: homeAddress.lat || item.lat,
+                lng: homeAddress.lng || item.lng,
+                isHomeAddress: true,
+              });
+              return;
+            }
+          }
+          
+          addAddress({
+            address: item.address,
+            placeId: item.placeId,
+            lat: item.lat,
+            lng: item.lng,
+            isRecent: true,
+          });
+        });
+      }
+      
+      // 2. Add home address if not already added
+      if (homeAddress && immediateRecs.length < MAX_RECOMMENDATIONS) {
+        const key = homeAddress.placeId || homeAddress.formattedAddress.toLowerCase();
+        if (!addedAddresses.has(key)) {
+          addAddress({
+            address: homeAddress.formattedAddress,
+            placeId: homeAddress.placeId,
+            lat: homeAddress.lat,
+            lng: homeAddress.lng,
+            isHomeAddress: true,
+          });
+        }
+      }
+      
+      // 3. Add university as fallback
+      if (university && immediateRecs.length < MAX_RECOMMENDATIONS) {
+        const key = university.toLowerCase();
+        if (!addedAddresses.has(key)) {
+          addAddress({
+            address: university,
+            isUniversity: true,
+          });
+        }
+      }
+      
+      // Show immediately
+      if (immediateRecs.length > 0) {
+        setRecommendations(immediateRecs);
+        setShowRecommendations(true);
+        setShowDropdown(true);
+        setSelectedIndex(-1);
+      } else {
+        setShowDropdown(false);
+      }
+      
+      // Then update with full recommendations (async)
+      getRecommendations().then(recs => {
+        if (recs.length > 0) {
+          setRecommendations(recs);
+          setShowRecommendations(true);
+          setShowDropdown(true);
+        }
+      });
+      
       inputRef.current.focus();
     }
   };
@@ -642,7 +1094,7 @@ export default function AddressAutocomplete({
 
 
         {/* Custom Dropdown Menu - HIGH Z-INDEX to appear above everything */}
-        {(showDropdown && (predictions.length > 0 || isFetching)) && (
+        {(showDropdown && (predictions.length > 0 || recommendations.length > 0 || isFetching)) && (
           <div
             ref={dropdownRef}
             id={`${id}-dropdown`}
@@ -652,7 +1104,7 @@ export default function AddressAutocomplete({
               left: 0,
               right: 0,
               marginTop: '8px',
-              minHeight: predictions.length > 0 ? 'auto' : '60px',
+              minHeight: (predictions.length > 0 || recommendations.length > 0) ? 'auto' : '60px',
               boxShadow: '0 10px 25px rgba(0,0,0,0.2)'
             }}
             role="listbox"
@@ -681,6 +1133,86 @@ export default function AddressAutocomplete({
               <div className="p-4 text-center text-gray-500">
                 <div className="animate-pulse">Buscando direcciones...</div>
               </div>
+            ) : showRecommendations && recommendations.length > 0 ? (
+              <>
+                {recommendations.map((recommendation, index) => {
+                  const isSelected = index === selectedIndex;
+                  return (
+                    <button
+                      key={`rec-${index}-${recommendation.address}`}
+                      type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (blurTimeoutRef.current) {
+                          clearTimeout(blurTimeoutRef.current);
+                          blurTimeoutRef.current = null;
+                        }
+                      }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleSelectRecommendation(recommendation);
+                      }}
+                      onMouseEnter={() => setSelectedIndex(index)}
+                      className={`w-full text-left px-5 py-4 flex items-center justify-between transition-all duration-150 first:rounded-t-lg last:rounded-b-lg border-b border-gray-200 last:border-b-0 cursor-pointer ${
+                        isSelected
+                          ? "bg-orange-50 border-l-4 border-l-orange-500"
+                          : "bg-white hover:bg-orange-50 hover:border-l-4 hover:border-l-orange-300"
+                      }`}
+                    >
+                      <div className="flex-1 min-w-0 pr-4">
+                        <div className="flex items-center space-x-2">
+                          {recommendation.isHomeAddress && (
+                            <svg className="w-4 h-4 text-green-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.707.707a1 1 0 001.414-1.414l-7-7z"/>
+                            </svg>
+                          )}
+                          {recommendation.isUniversity && (
+                            <svg className="w-4 h-4 text-blue-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M10.394 2.08a1 1 0 00-.788 0l-7 3a1 1 0 000 1.84L5.25 8.051a.999.999 0 01.356-.257l4-1.714a1 1 0 11.788 1.838L7.667 9.088l1.94.831a1 1 0 01.787 0l7-3a1 1 0 000-1.838l-7-3zM3.31 9.397L5 10.12v4.102a8.969 8.969 0 00-1.05-.174 1 1 0 01-.89-.89 11.115 11.115 0 01.25-3.762zM9.3 16.573A9.026 9.026 0 007 14.935v-3.957l1.818.78a3 3 0 002.364 0l5.508-2.361a11.026 11.026 0 01.25 3.762 1 1 0 01-.89.89 8.968 8.968 0 00-5.35 2.524 1 1 0 01-1.4 0zM6 18a1 1 0 001-1v-2.065a8.935 8.935 0 00-2-.712V17a1 1 0 001 1z"/>
+                            </svg>
+                          )}
+                          {recommendation.isRecent && (
+                            <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd"/>
+                            </svg>
+                          )}
+                          <div className={`text-base font-semibold break-words ${
+                            isSelected ? "text-orange-700" : "text-gray-900"
+                          }`}>
+                            {recommendation.address}
+                          </div>
+                        </div>
+                        {(recommendation.isHomeAddress || recommendation.isUniversity || recommendation.isRecent) && (
+                          <div className="text-xs text-gray-500 mt-1">
+                            {recommendation.isHomeAddress ? "Tu dirección" : recommendation.isUniversity ? "Basado en tu universidad" : "Búsqueda reciente"}
+                          </div>
+                        )}
+                      </div>
+                      <div className="ml-3 flex-shrink-0">
+                        <svg
+                          className={`w-5 h-5 transition-colors ${
+                            isSelected ? "text-orange-500" : "text-gray-400"
+                          }`}
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                          strokeWidth={2.5}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M9 5l7 7-7 7"
+                          />
+                        </svg>
+                      </div>
+                    </button>
+                  );
+                })}
+              </>
             ) : predictions.length > 0 ? (
               predictions.map((prediction, index) => {
                 const isSelected = index === selectedIndex;

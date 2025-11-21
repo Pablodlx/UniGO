@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import DesktopLayout from "@/components/DesktopLayout";
 import Link from "next/link";
 import { clearToken } from "@/lib/api";
+import AddressAutocomplete, { AddressValue } from "@/components/AddressAutocomplete";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000/api";
 
@@ -62,10 +63,15 @@ async function uploadAvatar(file: File) {
 const schema = z.object({
   first_name: z.string().min(1, "Obligatorio").max(150),
   last_name: z.string().min(1, "Obligatorio").max(150),
-  university: z.string().min(1, "Obligatorio").max(150),
+  university: z.string().max(150).optional(), // University is auto-detected, not editable
   degree: z.string().min(1, "Obligatorio").max(150),
   course: z.number().int().min(1, "Mínimo 1").max(6, "Máximo 6"),
-  ride_intent: z.enum(["offers", "seeks", "both"]),
+  home_address: z.object({
+    formattedAddress: z.string(),
+    placeId: z.string(),
+    lat: z.number(),
+    lng: z.number(),
+  }).nullable().refine((val) => val !== null, { message: "Obligatorio" }),
 });
 type FormValues = z.infer<typeof schema>;
 
@@ -75,7 +81,12 @@ interface ProfileData {
   university: string | null;
   degree: string | null;
   course: number | null;
-  ride_intent: string | null;
+  home_address: {
+    formatted_address: string;
+    place_id: string;
+    lat: number;
+    lng: number;
+  } | null;
   avatar_url: string | null;
   average_rating: number | null;
   rating_count: number;
@@ -89,6 +100,8 @@ export default function ProfilePage() {
   const [serverError, setServerError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [avatarMsg, setAvatarMsg] = useState<string | null>(null);
+
+  const [homeAddress, setHomeAddress] = useState<AddressValue | null>(null);
 
   const {
     register,
@@ -104,7 +117,7 @@ export default function ProfilePage() {
       university: "",
       degree: "",
       course: 1,
-      ride_intent: "both",
+      home_address: null,
     },
   });
 
@@ -138,7 +151,21 @@ export default function ProfilePage() {
       setValue("university", p.university ?? "");
       setValue("degree", p.degree ?? "");
       setValue("course", p.course ?? 1);
-      setValue("ride_intent", (p.ride_intent ?? "both") as FormValues["ride_intent"]);
+      
+      // Set home address if available
+      if (p.home_address) {
+        const addressValue: AddressValue = {
+          formattedAddress: p.home_address.formatted_address,
+          placeId: p.home_address.place_id,
+          lat: p.home_address.lat,
+          lng: p.home_address.lng,
+        };
+        setHomeAddress(addressValue);
+        setValue("home_address", addressValue);
+      } else {
+        setHomeAddress(null);
+        setValue("home_address", null);
+      }
     } catch (e: any) {
       const errorMessage = e?.message ?? "Error cargando perfil";
       if (errorMessage.includes("401") || errorMessage.includes("credentials")) {
@@ -160,14 +187,14 @@ export default function ProfilePage() {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    const map: Record<string, keyof FormValues> = {
+      const map: Record<string, keyof FormValues> = {
       full_name: "first_name", // Map backend full_name to frontend first_name
       first_name: "first_name",
       last_name: "last_name",
       university: "university",
       degree: "degree",
       course: "course",
-      ride_intent: "ride_intent",
+      home_address: "home_address",
     };
     list.forEach((field) => {
       const key = map[field];
@@ -184,12 +211,17 @@ export default function ProfilePage() {
     
     try {
       // Combine first_name and last_name into full_name for backend
+      // University is auto-detected from email and cannot be edited - don't send it
       const payload = {
         full_name: `${values.first_name} ${values.last_name}`.trim(),
-        university: values.university,
         degree: values.degree,
         course: values.course,
-        ride_intent: values.ride_intent,
+        home_address: values.home_address ? {
+          formatted_address: values.home_address.formattedAddress,
+          place_id: values.home_address.placeId,
+          lat: values.home_address.lat,
+          lng: values.home_address.lng,
+        } : null,
       };
       
       console.log("Sending payload to backend:", payload); // Debug log
@@ -422,9 +454,18 @@ export default function ProfilePage() {
                   </label>
             <input
               {...register("university")}
-                    className="w-full px-4 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-lg font-medium"
+                    className="w-full px-4 py-4 border border-gray-300 rounded-xl text-lg font-medium bg-gray-50 cursor-not-allowed"
                     placeholder="Ej. Universidad CEU"
+                    disabled
+                    readOnly
+                    title="La universidad se detecta automáticamente desde tu email y no se puede editar"
             />
+            <p className="text-sm text-gray-500 mt-2 flex items-center space-x-1">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd"/>
+              </svg>
+              <span>Detectada automáticamente desde tu email</span>
+            </p>
                   {errors.university && (
                     <p className="text-red-500 text-sm mt-2">{errors.university.message}</p>
                   )}
@@ -462,20 +503,20 @@ export default function ProfilePage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-3">
-                    Preferencia de viaje *
-                  </label>
-                  <select
-                    {...register("ride_intent")}
-                    className="w-full px-4 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-lg font-medium"
-                  >
-                    <option value="offers">Ofrezco viajes</option>
-                    <option value="seeks">Busco viajes</option>
-                    <option value="both">Ambos</option>
-                  </select>
-                  {errors.ride_intent && (
-                    <p className="text-red-500 text-sm mt-2">{errors.ride_intent.message}</p>
-                  )}
+                  <AddressAutocomplete
+                    id="home-address"
+                    label="Dirección *"
+                    placeholder="Ej. Calle Gran Vía, 1"
+                    initialValue={homeAddress}
+                    onChange={(value) => {
+                      setHomeAddress(value);
+                      setValue("home_address", value, { shouldValidate: true, shouldDirty: true });
+                    }}
+                    required={true}
+                    error={errors.home_address?.message}
+                    showVerifiedBadge={true}
+                    className="w-full"
+                  />
                 </div>
               </div>
 
