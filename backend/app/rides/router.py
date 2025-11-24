@@ -7,7 +7,7 @@ from app.auth.models import Ride, User, Booking, BookingStatus
 from app.auth.router import get_current_user
 from app.db.session import get_db
 from app.rides import service
-from app.rides.schemas import RideCreate, RideOut, RideSearch
+from app.rides.schemas import RideCreate, RideOut, RideSearch, Passenger
 from app.rides import favorites_service
 from app.rides.favorites_schemas import FavoriteRideCreate, FavoriteRideOut
 
@@ -125,8 +125,20 @@ def get_my_bookings(
                         print(f"Warning: Could not get rating for driver {driver.id}: {e}")
                         driver_average_rating = None
                     
-                    from app.rides.service import calculate_arrival_time_string
+                    from app.rides.service import calculate_arrival_time_string, _get_ride_passengers
                     arrival_time = calculate_arrival_time_string(ride)
+                    
+                    # Get first confirmed booking's passenger_id for reserved_by_user_id
+                    reserved_by_user_id = None
+                    first_booking = db.query(Booking).filter(
+                        Booking.ride_id == ride.id,
+                        Booking.status == BookingStatus.confirmed
+                    ).first()
+                    if first_booking:
+                        reserved_by_user_id = first_booking.passenger_id
+                    
+                    # Get all confirmed passengers for this ride
+                    passengers_info, passengers_ids = _get_ride_passengers(db, ride.id)
                     
                     result.append(RideOut(
                         id=ride.id,
@@ -135,6 +147,10 @@ def get_my_bookings(
                         driver_university=driver.university,
                         departure_city=ride.departure_city,
                         destination_city=ride.destination_city,
+                        departure_lat=ride.departure_lat,
+                        departure_lng=ride.departure_lng,
+                        destination_lat=ride.destination_lat,
+                        destination_lng=ride.destination_lng,
                         departure_date=ride.departure_date,
                         departure_time=ride.departure_time,
                         available_seats=ride.available_seats,
@@ -147,6 +163,9 @@ def get_my_bookings(
                         is_active=ride.is_active,
                         created_at=ride.created_at,
                         driver_average_rating=driver_average_rating,
+                        reserved_by_user_id=reserved_by_user_id,
+                        passengers=passengers_info,
+                        passengers_ids=passengers_ids,
                     ))
             except Exception as e:
                 print(f"Error processing booking {booking.id}: {e}")
@@ -580,3 +599,40 @@ def cancel_booking(
         db.rollback()
         print(f"Error canceling booking: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to cancel booking: {str(e)}")
+
+
+@router.get("/{ride_id}/passengers", response_model=List[Passenger])
+def get_ride_passengers(
+    ride_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get passengers for a ride (only driver can access)"""
+    ride = db.query(Ride).filter(Ride.id == ride_id).first()
+    if not ride:
+        raise HTTPException(status_code=404, detail="Ride not found")
+    
+    if ride.driver_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the driver can view passengers")
+    
+    bookings = db.query(Booking).filter(
+        and_(
+            Booking.ride_id == ride_id,
+            Booking.status == BookingStatus.confirmed
+        )
+    ).all()
+    
+    passengers = []
+    for booking in bookings:
+        passenger = db.query(User).filter(User.id == booking.passenger_id).first()
+        if passenger:
+            passengers.append(Passenger(
+                booking_id=booking.id,
+                passenger_id=passenger.id,
+                passenger_name=passenger.full_name or passenger.email,
+                passenger_avatar=passenger.avatar_url,
+                has_rated=False,  # We could check this if needed
+                can_rate=False,   # We could check this if needed
+            ))
+    
+    return passengers

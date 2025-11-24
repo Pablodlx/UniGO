@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MapPinIcon, CalendarIcon, UserIcon } from "@heroicons/react/24/outline";
 
 interface SearchFormProps {
@@ -15,12 +15,23 @@ export interface SearchData {
 }
 
 export default function SearchForm({ onSubmit }: SearchFormProps) {
+  const [mounted, setMounted] = useState(false);
+  
   const [formData, setFormData] = useState<SearchData>({
     origin: "",
     destination: "",
-    date: new Date().toLocaleDateString("es-ES"),
+    date: "",
     passengers: 1,
   });
+
+  // Set mounted and update date when component mounts
+  useEffect(() => {
+    setMounted(true);
+    setFormData(prev => ({
+      ...prev,
+      date: new Date().toLocaleDateString("es-ES")
+    }));
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

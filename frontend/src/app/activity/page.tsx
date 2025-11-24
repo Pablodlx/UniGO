@@ -13,8 +13,13 @@ export default function ActivityPage() {
   const router = useRouter();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
   const [upcomingTrips, setUpcomingTrips] = useState<UpcomingTrip[]>([]);
   const [pastTrips, setPastTrips] = useState<RideHistoryItem[]>([]);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const token = getToken();
@@ -54,6 +59,10 @@ export default function ActivityPage() {
   );
 
   const formatDate = (value: string) => {
+    if (!mounted) {
+      // Return a placeholder during SSR to avoid hydration mismatch
+      return "";
+    }
     const date = new Date(value);
     return date.toLocaleDateString("es-ES", {
       weekday: "short",
@@ -64,8 +73,10 @@ export default function ActivityPage() {
 
   const formatTime = (value?: string) => value ?? "";
 
-  const formatCurrency = (value: number) =>
-    new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" }).format(value);
+  const formatCurrency = (value: number) => {
+    if (!mounted) return ""; // Return empty string during SSR
+    return new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" }).format(value);
+  };
 
   if (!isLoggedIn && loading) {
     return null;

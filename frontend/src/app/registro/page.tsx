@@ -13,6 +13,11 @@ export default function RegistroPage() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [history, setHistory] = useState<RideHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   const [ratingModal, setRatingModal] = useState<{
     isOpen: boolean;
     bookingId: number | null;
@@ -171,6 +176,7 @@ export default function RegistroPage() {
   };
 
   const formatDate = (dateString: string) => {
+    if (!mounted) return ""; // Return empty string during SSR
     const date = new Date(dateString);
     return date.toLocaleDateString('es-ES', { 
       weekday: 'long', 

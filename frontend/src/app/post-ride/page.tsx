@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -12,6 +12,7 @@ import AddressAutocomplete, { AddressValue } from "@/components/AddressAutocompl
 import SaveFavoriteModal from "@/components/SaveFavoriteModal";
 import FavoritesListModal from "@/components/FavoritesListModal";
 import ConfirmFavoriteModal from "@/components/ConfirmFavoriteModal";
+import { loadGoogleMaps } from "@/utils/googleMapsLoader";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000/api";
 
@@ -106,6 +107,9 @@ export default function PostRidePage() {
   const [selectedFavorite, setSelectedFavorite] = useState<FavoriteRide | null>(null);
   const [loadingFavorites, setLoadingFavorites] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [distanceKm, setDistanceKm] = useState<number | null>(null);
+  const [durationMinutes, setDurationMinutes] = useState<number | null>(null);
+  const [loadingDirections, setLoadingDirections] = useState(false);
 
   const {
     register,
@@ -130,6 +134,76 @@ export default function PostRidePage() {
   useEffect(() => {
     setIsLoggedIn(!!getToken());
   }, []);
+
+  // Get directions when origin and destination are selected
+  const getDirections = useCallback(async () => {
+    if (!fromAddress || !toAddress || !fromAddress.lat || !fromAddress.lng || !toAddress.lat || !toAddress.lng) {
+      setDistanceKm(null);
+      setDurationMinutes(null);
+      return;
+    }
+
+    setLoadingDirections(true);
+    try {
+      await loadGoogleMaps();
+      
+      if (!window.google?.maps?.DirectionsService) {
+        console.warn("Google Directions API not available");
+        setLoadingDirections(false);
+        return;
+      }
+
+      const directionsService = new window.google.maps.DirectionsService();
+      
+      directionsService.route(
+        {
+          origin: { lat: fromAddress.lat, lng: fromAddress.lng },
+          destination: { lat: toAddress.lat, lng: toAddress.lng },
+          travelMode: window.google.maps.TravelMode.DRIVING,
+        },
+        (result, status) => {
+          setLoadingDirections(false);
+          if (status === window.google.maps.DirectionsStatus.OK && result) {
+            const route = result.routes[0];
+            if (route && route.legs && route.legs.length > 0) {
+              const leg = route.legs[0];
+              // Convert distance from meters to kilometers
+              const distanceMeters = leg.distance?.value || 0;
+              const distanceKmValue = distanceMeters / 1000;
+              // Convert duration from seconds to minutes
+              const durationSeconds = leg.duration?.value || 0;
+              const durationMinutesValue = durationSeconds / 60;
+              
+              setDistanceKm(distanceKmValue);
+              setDurationMinutes(durationMinutesValue);
+            }
+          } else {
+            console.warn("Directions API failed:", status);
+            setDistanceKm(null);
+            setDurationMinutes(null);
+          }
+        }
+      );
+    } catch (error) {
+      console.error("Error loading directions:", error);
+      setLoadingDirections(false);
+      setDistanceKm(null);
+      setDurationMinutes(null);
+    }
+  }, [fromAddress, toAddress]);
+
+  // Call getDirections when addresses change
+  useEffect(() => {
+    getDirections();
+  }, [getDirections]);
+
+  // Calculate recommended price
+  const recommendedPrice = distanceKm !== null && durationMinutes !== null
+    ? (distanceKm * 0.06) + (durationMinutes * 0.015) + 0.60
+    : null;
+  
+  const minPrice = recommendedPrice ? recommendedPrice * 0.9 : null;
+  const maxPrice = recommendedPrice ? recommendedPrice * 1.1 : null;
 
   const onSubmit = async (values: FormValues) => {
     setMsg(null);
@@ -645,6 +719,35 @@ export default function PostRidePage() {
                   />
                   {errors.price_per_seat && (
                     <p className="text-red-500 text-sm mt-2">{errors.price_per_seat.message}</p>
+                  )}
+                  
+                  {/* Recommended Price UI Block */}
+                  {recommendedPrice !== null && (
+                    <div className="mt-4 p-4 bg-orange-50 border border-orange-200 rounded-xl">
+                      <div className="flex items-center space-x-2 mb-2">
+                        <svg className="w-5 h-5 text-orange-600" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                        </svg>
+                        <p className="text-sm font-semibold text-orange-900">
+                          Precio recomendado: {recommendedPrice.toFixed(2)}€
+                        </p>
+                      </div>
+                      {minPrice !== null && maxPrice !== null && (
+                        <p className="text-sm text-orange-700 mb-2">
+                          Rango recomendado: {minPrice.toFixed(2)}€ – {maxPrice.toFixed(2)}€
+                        </p>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setValue("price_per_seat", parseFloat(recommendedPrice.toFixed(2)))}
+                        className="text-xs text-orange-600 hover:text-orange-700 underline font-medium"
+                      >
+                        Usar precio recomendado
+                      </button>
+                      {loadingDirections && (
+                        <p className="text-xs text-orange-600 mt-2">Calculando ruta...</p>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>

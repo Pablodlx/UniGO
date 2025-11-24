@@ -5,8 +5,8 @@ import pytz
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
-from app.auth.models import Ride, User
-from app.rides.schemas import RideCreate, RideOut, RideSearch
+from app.auth.models import Ride, User, Booking, BookingStatus
+from app.rides.schemas import RideCreate, RideOut, RideSearch, PassengerInfo
 from app.core.maps import calculate_travel_time_sync
 # Import ratings service defensively to avoid breaking if ratings module has issues
 try:
@@ -14,6 +14,29 @@ try:
 except ImportError:
     # If ratings module doesn't exist or has import errors, create a dummy service
     ratings_service = None
+
+
+def _get_ride_passengers(db: Session, ride_id: int) -> tuple[List[PassengerInfo], List[int]]:
+    """Helper function to get all confirmed passengers for a ride"""
+    bookings = db.query(Booking).filter(
+        Booking.ride_id == ride_id,
+        Booking.status == BookingStatus.confirmed
+    ).all()
+    
+    passengers_info = []
+    passengers_ids = []
+    
+    for booking in bookings:
+        passenger_user = db.query(User).filter(User.id == booking.passenger_id).first()
+        if passenger_user:
+            passengers_info.append(PassengerInfo(
+                id=passenger_user.id,
+                name=passenger_user.full_name or passenger_user.email,
+                avatar_url=passenger_user.avatar_url
+            ))
+            passengers_ids.append(passenger_user.id)
+    
+    return passengers_info, passengers_ids
 
 
 def get_ride_check_datetime(ride: Ride) -> datetime:
@@ -194,6 +217,8 @@ def get_ride_with_driver_info(db: Session, ride_id: int) -> RideOut:
         return None
     
     driver = db.query(User).filter(User.id == ride.driver_id).first()
+    if not driver:
+        raise ValueError(f"Driver not found for ride {ride_id}")
     
     # Get driver's average rating (gracefully handle if ratings table doesn't exist)
     driver_average_rating = None
@@ -202,6 +227,18 @@ def get_ride_with_driver_info(db: Session, ride_id: int) -> RideOut:
             driver_average_rating = ratings_service.get_user_average_rating(db, driver.id)
         except Exception:
             driver_average_rating = None
+    
+    # Get first confirmed booking's passenger_id for reserved_by_user_id
+    reserved_by_user_id = None
+    first_booking = db.query(Booking).filter(
+        Booking.ride_id == ride_id,
+        Booking.status == BookingStatus.confirmed
+    ).first()
+    if first_booking:
+        reserved_by_user_id = first_booking.passenger_id
+    
+    # Get all confirmed passengers for this ride
+    passengers_info, passengers_ids = _get_ride_passengers(db, ride_id)
     
     arrival_time = calculate_arrival_time_string(ride)
     
@@ -212,6 +249,10 @@ def get_ride_with_driver_info(db: Session, ride_id: int) -> RideOut:
         driver_university=driver.university,
         departure_city=ride.departure_city,
         destination_city=ride.destination_city,
+        departure_lat=ride.departure_lat,
+        departure_lng=ride.departure_lng,
+        destination_lat=ride.destination_lat,
+        destination_lng=ride.destination_lng,
         departure_date=ride.departure_date,
         departure_time=ride.departure_time,
         available_seats=ride.available_seats,
@@ -224,6 +265,9 @@ def get_ride_with_driver_info(db: Session, ride_id: int) -> RideOut:
         is_active=ride.is_active,
         created_at=ride.created_at,
         driver_average_rating=driver_average_rating,
+        reserved_by_user_id=reserved_by_user_id,
+        passengers=passengers_info,
+        passengers_ids=passengers_ids,
     )
 
 
@@ -264,6 +308,8 @@ def search_rides(db: Session, search_params: RideSearch, exclude_booked_by_user_
         rides = [r for r in rides if r.id not in booked_ride_ids]
     
     # Convert to RideOut with driver info
+    from app.auth.models import Booking, BookingStatus
+    
     result = []
     for ride in rides:
         driver = db.query(User).filter(User.id == ride.driver_id).first()
@@ -275,6 +321,18 @@ def search_rides(db: Session, search_params: RideSearch, exclude_booked_by_user_
             except Exception:
                 driver_average_rating = None
         
+        # Get first confirmed booking's passenger_id for reserved_by_user_id
+        reserved_by_user_id = None
+        first_booking = db.query(Booking).filter(
+            Booking.ride_id == ride.id,
+            Booking.status == BookingStatus.confirmed
+        ).first()
+        if first_booking:
+            reserved_by_user_id = first_booking.passenger_id
+        
+        # Get all confirmed passengers for this ride
+        passengers_info, passengers_ids = _get_ride_passengers(db, ride.id)
+        
         arrival_time = calculate_arrival_time_string(ride)
         
         result.append(RideOut(
@@ -284,6 +342,10 @@ def search_rides(db: Session, search_params: RideSearch, exclude_booked_by_user_
             driver_university=driver.university,
             departure_city=ride.departure_city,
             destination_city=ride.destination_city,
+            departure_lat=ride.departure_lat,
+            departure_lng=ride.departure_lng,
+            destination_lat=ride.destination_lat,
+            destination_lng=ride.destination_lng,
             departure_date=ride.departure_date,
             departure_time=ride.departure_time,
             available_seats=ride.available_seats,
@@ -296,6 +358,9 @@ def search_rides(db: Session, search_params: RideSearch, exclude_booked_by_user_
             is_active=ride.is_active,
             created_at=ride.created_at,
             driver_average_rating=driver_average_rating,
+            reserved_by_user_id=reserved_by_user_id,
+            passengers=passengers_info,
+            passengers_ids=passengers_ids,
         ))
     
     return result
@@ -338,6 +403,18 @@ def get_user_rides(db: Session, user_id: int) -> List[RideOut]:
                     
                     arrival_time = calculate_arrival_time_string(ride)
                     
+                    # Get first confirmed booking's passenger_id for reserved_by_user_id
+                    reserved_by_user_id = None
+                    first_booking = db.query(Booking).filter(
+                        Booking.ride_id == ride.id,
+                        Booking.status == BookingStatus.confirmed
+                    ).first()
+                    if first_booking:
+                        reserved_by_user_id = first_booking.passenger_id
+                    
+                    # Get all confirmed passengers for this ride
+                    passengers_info, passengers_ids = _get_ride_passengers(db, ride.id)
+                    
                     result.append(RideOut(
                         id=ride.id,
                         driver_id=ride.driver_id,
@@ -345,6 +422,10 @@ def get_user_rides(db: Session, user_id: int) -> List[RideOut]:
                         driver_university=driver.university,
                         departure_city=ride.departure_city,
                         destination_city=ride.destination_city,
+                        departure_lat=ride.departure_lat,
+                        departure_lng=ride.departure_lng,
+                        destination_lat=ride.destination_lat,
+                        destination_lng=ride.destination_lng,
                         departure_date=ride.departure_date,
                         departure_time=ride.departure_time,
                         available_seats=ride.available_seats,
@@ -357,6 +438,9 @@ def get_user_rides(db: Session, user_id: int) -> List[RideOut]:
                         is_active=ride.is_active,
                         created_at=ride.created_at,
                         driver_average_rating=driver_average_rating,
+                        reserved_by_user_id=reserved_by_user_id,
+                        passengers=passengers_info,
+                        passengers_ids=passengers_ids,
                     ))
             except Exception as e:
                 print(f"Error processing ride {ride.id}: {e}")

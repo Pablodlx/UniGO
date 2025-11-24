@@ -40,8 +40,9 @@ export default function LoginPage() {
 
       // ✅ Redirige directamente a Perfil
       router.replace("/profile");
-    } catch (e: any) {
-      setMsg(e?.message ?? "Error en el login");
+    } catch (e: unknown) {
+      const errorMessage = e instanceof Error ? e.message : "Error en el login";
+      setMsg(errorMessage);
     } finally {
       setLoading(false);
     }

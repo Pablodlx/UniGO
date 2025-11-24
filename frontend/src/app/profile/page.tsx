@@ -22,30 +22,29 @@ function authHeaders(): Record<string, string> {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 async function getProfile() {
-  const r = await fetch(`${BASE}/me/profile`, { headers: { ...authHeaders() }, cache: "no-store" });
-  if (!r.ok) throw new Error(`Perfil: ${r.status}`);
-  return r.json();
+  try {
+    const r = await fetch(`${BASE}/me/profile`, { headers: { ...authHeaders() }, cache: "no-store" });
+    if (!r.ok) {
+      const errorText = await r.text().catch(() => "");
+      throw new Error(errorText || `Perfil: ${r.status}`);
+    }
+    return r.json();
+  } catch (error: any) {
+    console.error("Error in getProfile:", error);
+    throw error;
+  }
 }
 async function updateProfile(payload: any) {
-  console.log("Sending payload to backend:", payload); // Debug log
-  
   const r = await fetch(`${BASE}/me/profile`, {
     method: "PUT",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(payload),
   });
-  
-  console.log("Backend response status:", r.status); // Debug log
-  
   if (!r.ok) {
     const txt = await r.text();
-    console.error("Backend error response:", txt); // Debug log
     throw new Error(txt || `Update: ${r.status}`);
   }
-  
-  const result = await r.json();
-  console.log("Backend response data:", result); // Debug log
-  return result;
+  return r.json();
 }
 async function uploadAvatar(file: File) {
   const form = new FormData();
@@ -63,7 +62,7 @@ async function uploadAvatar(file: File) {
 const schema = z.object({
   first_name: z.string().min(1, "Obligatorio").max(150),
   last_name: z.string().min(1, "Obligatorio").max(150),
-  university: z.string().max(150).optional(), // University is auto-detected, not editable
+  university: z.string().max(150).optional(),
   degree: z.string().min(1, "Obligatorio").max(150),
   course: z.number().int().min(1, "Mínimo 1").max(6, "Máximo 6"),
   home_address: z.object({
@@ -100,7 +99,6 @@ export default function ProfilePage() {
   const [serverError, setServerError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [avatarMsg, setAvatarMsg] = useState<string | null>(null);
-
   const [homeAddress, setHomeAddress] = useState<AddressValue | null>(null);
 
   const {
@@ -122,73 +120,85 @@ export default function ProfilePage() {
   });
 
   useEffect(() => {
-    const currentToken = getToken();
+    if (typeof window === "undefined") return;
     
-    if (!currentToken) {
-      // Reset all state when no token
-      setProfile(null);
-      setLoading(false);
-      router.push("/login");
+    const token = getToken();
+    if (!token) {
+      setTimeout(() => router.push("/login"), 0);
       return;
     }
-    loadProfile();
-  }, [router]);
 
-  async function loadProfile() {
-    try {
-      const p = await getProfile();
-      console.log("Loaded profile data:", p); // Debug log
-      setProfile(p);
-      
-      // Split full_name into first_name and last_name
-      const fullName = p.full_name ?? "";
-      const nameParts = fullName.split(" ");
-      const firstName = nameParts[0] ?? "";
-      const lastName = nameParts.slice(1).join(" ") ?? "";
-      
-      setValue("first_name", firstName);
-      setValue("last_name", lastName);
-      setValue("university", p.university ?? "");
-      setValue("degree", p.degree ?? "");
-      setValue("course", p.course ?? 1);
-      
-      // Set home address if available
-      if (p.home_address) {
-        const addressValue: AddressValue = {
-          formattedAddress: p.home_address.formatted_address,
-          placeId: p.home_address.place_id,
-          lat: p.home_address.lat,
-          lng: p.home_address.lng,
-        };
-        setHomeAddress(addressValue);
-        setValue("home_address", addressValue);
-      } else {
-        setHomeAddress(null);
-        setValue("home_address", null);
+    let cancelled = false;
+
+    async function load() {
+      try {
+        setLoading(true);
+        setServerError(null);
+        const p = await getProfile();
+        if (cancelled) return;
+        
+        setProfile(p);
+        
+        const fullName = p.full_name ?? "";
+        const nameParts = fullName.split(" ");
+        const firstName = nameParts[0] ?? "";
+        const lastName = nameParts.slice(1).join(" ") ?? "";
+        
+        // Set form values
+        setValue("first_name", firstName);
+        setValue("last_name", lastName);
+        setValue("university", p.university ?? "");
+        setValue("degree", p.degree ?? "");
+        setValue("course", p.course ?? 1);
+        
+        if (p.home_address) {
+          const addressValue: AddressValue = {
+            formattedAddress: p.home_address.formatted_address,
+            placeId: p.home_address.place_id,
+            lat: p.home_address.lat,
+            lng: p.home_address.lng,
+          };
+          setHomeAddress(addressValue);
+          setValue("home_address", addressValue);
+        } else {
+          setHomeAddress(null);
+          setValue("home_address", null);
+        }
+      } catch (e: unknown) {
+        if (cancelled) return;
+        console.error("Error loading profile:", e);
+        const msg = e instanceof Error ? e.message : "Error cargando perfil";
+        if (msg.includes("401") || msg.includes("403") || msg.includes("Unauthorized") || msg.includes("UNAUTHORIZED")) {
+          localStorage.removeItem("token");
+          setTimeout(() => router.push("/login"), 0);
+          return;
+        }
+        if (msg.includes("Network error") || msg.includes("Failed to fetch") || msg.includes("Could not reach")) {
+          setServerError("No se pudo conectar con el servidor. Por favor, verifica que el backend esté corriendo.");
+        } else {
+          setServerError(msg);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
-    } catch (e: any) {
-      const errorMessage = e?.message ?? "Error cargando perfil";
-      if (errorMessage.includes("401") || errorMessage.includes("credentials")) {
-        // Token is invalid or expired, redirect to login
-        localStorage.removeItem("token");
-        router.push("/login");
-        return;
-      }
-      setServerError(errorMessage);
-    } finally {
-      setLoading(false);
     }
-  }
+
+    load();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount
 
   function mapMissingFieldsToErrors(message: string) {
     const m = message.match(/Faltan campos obligatorios:\s*(.+)/i);
     if (!m) return;
-    const list = m[1]
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-      const map: Record<string, keyof FormValues> = {
-      full_name: "first_name", // Map backend full_name to frontend first_name
+    const list = m[1].split(",").map((s) => s.trim()).filter(Boolean);
+    const map: Record<string, keyof FormValues> = {
+      full_name: "first_name",
       first_name: "first_name",
       last_name: "last_name",
       university: "university",
@@ -207,11 +217,7 @@ export default function ProfilePage() {
     setSuccessMsg(null);
     setSaving(true);
     
-    console.log("Submitting profile data:", values); // Debug log
-    
     try {
-      // Combine first_name and last_name into full_name for backend
-      // University is auto-detected from email and cannot be edited - don't send it
       const payload = {
         full_name: `${values.first_name} ${values.last_name}`.trim(),
         degree: values.degree,
@@ -224,29 +230,43 @@ export default function ProfilePage() {
         } : null,
       };
       
-      console.log("Sending payload to backend:", payload); // Debug log
-      
       const updated = await updateProfile(payload);
-      console.log("Profile updated successfully:", updated); // Debug log
       setProfile(updated);
       setSuccessMsg("Perfil guardado correctamente ✅");
       
-      // Force reload the profile data to ensure it's saved
-      setTimeout(() => {
-        loadProfile();
-      }, 1000);
+      const fullName = updated.full_name ?? "";
+      const nameParts = fullName.split(" ");
+      const firstName = nameParts[0] ?? "";
+      const lastName = nameParts.slice(1).join(" ") ?? "";
       
-    } catch (e: any) {
-      console.error("Error updating profile:", e); // Debug log
-      const msg = e?.message ?? "No se pudo guardar";
-      if (msg.includes("401") || msg.includes("credentials")) {
-        // Token is invalid or expired, redirect to login
-        localStorage.removeItem("token");
-        router.push("/login");
-        return;
+      setValue("first_name", firstName);
+      setValue("last_name", lastName);
+      setValue("university", updated.university ?? "");
+      setValue("degree", updated.degree ?? "");
+      setValue("course", updated.course ?? 1);
+      
+      if (updated.home_address) {
+        const addressValue: AddressValue = {
+          formattedAddress: updated.home_address.formatted_address,
+          placeId: updated.home_address.place_id,
+          lat: updated.home_address.lat,
+          lng: updated.home_address.lng,
+        };
+        setHomeAddress(addressValue);
+        setValue("home_address", addressValue);
+      } else {
+        setHomeAddress(null);
+        setValue("home_address", null);
       }
-      setServerError(msg);
-      mapMissingFieldsToErrors(msg);
+    } catch (e: any) {
+      const msg = e?.message ?? "No se pudo guardar";
+        if (msg.includes("401") || msg.includes("credentials")) {
+          localStorage.removeItem("token");
+          router.push("/login");
+          return;
+        }
+        setServerError(msg);
+        mapMissingFieldsToErrors(msg);
     } finally {
       setSaving(false);
     }
@@ -258,18 +278,13 @@ export default function ProfilePage() {
     if (!e.target.files?.length) return;
     const file = e.target.files[0];
     
-    console.log("Selected file:", file); // Debug log
-    
     try {
       const updated = await uploadAvatar(file);
-      console.log("Avatar upload response:", updated); // Debug log
       setProfile(updated);
       setAvatarMsg("Avatar actualizado ✅");
     } catch (e: any) {
-      console.error("Avatar upload error:", e); // Debug log
       const msg = e?.message ?? "No se pudo subir el avatar";
       if (msg.includes("401") || msg.includes("credentials")) {
-        // Token is invalid or expired, redirect to login
         localStorage.removeItem("token");
         router.push("/login");
         return;
@@ -280,18 +295,29 @@ export default function ProfilePage() {
     }
   }
 
-  // Check token immediately to prevent flash of old content
-  const hasToken = typeof window !== "undefined" && getToken();
-  
-  if (!hasToken || loading) {
+  // Show loading state during initial load
+  if (loading && !profile) {
     return (
       <DesktopLayout>
         <div className="min-h-screen bg-gray-50 flex items-center justify-center">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto"></div>
-            <p className="mt-4 text-gray-600">{!hasToken ? "Redirecting to login..." : "Cargando perfil..."}</p>
+            <p className="mt-4 text-gray-600">Cargando perfil...</p>
           </div>
-      </div>
+        </div>
+      </DesktopLayout>
+    );
+  }
+
+  if (loading) {
+    return (
+      <DesktopLayout>
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto"></div>
+            <p className="mt-4 text-gray-600">Cargando perfil...</p>
+          </div>
+        </div>
       </DesktopLayout>
     );
   }
@@ -308,9 +334,9 @@ export default function ProfilePage() {
                   <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"/>
                   <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1V8a1 1 0 00-1-1h-3z"/>
                 </svg>
-        </div>
+              </div>
               <span className="text-2xl font-bold text-gray-800">UniGO</span>
-        </div>
+            </div>
             <div className="flex items-center space-x-8">
               <button 
                 onClick={() => router.push("/")}
@@ -342,8 +368,7 @@ export default function ProfilePage() {
               <button
                 onClick={() => {
                   clearToken();
-                  // Force navigation to trigger state reset
-                  window.location.href = "/profile";
+                  window.location.href = "/login";
                 }}
                 className="px-6 py-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg font-medium transition-colors flex items-center space-x-2 border border-red-200"
               >
@@ -360,8 +385,6 @@ export default function ProfilePage() {
       {/* Main Content */}
       <div className="bg-gray-50 min-h-screen">
         <div className="max-w-4xl mx-auto px-8 py-12">
-
-          {/* Profile Form Card */}
           <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
               {/* Photo Section */}
@@ -369,28 +392,18 @@ export default function ProfilePage() {
                 <div className="relative inline-block">
                   <div className="w-32 h-32 bg-gray-200 rounded-full flex items-center justify-center mx-auto">
                     {profile?.avatar_url ? (
-                      <>
-                        {console.log("Avatar URL:", profile.avatar_url)} {/* Debug log */}
-                        <img
-                          src={profile.avatar_url.startsWith('http') ? profile.avatar_url : `${BASE.replace('/api', '')}${profile.avatar_url}`}
-                          alt="Avatar"
-                          className="w-32 h-32 rounded-full object-cover"
-                          onError={(e) => {
-                            console.error("Image load error:", e); // Debug log
-                            e.currentTarget.style.display = 'none';
-                          }}
-                          onLoad={() => {
-                            console.log("Image loaded successfully"); // Debug log
-                          }}
-                        />
-                      </>
+                      <img
+                        src={profile.avatar_url.startsWith('http') ? profile.avatar_url : `${BASE.replace('/api', '')}${profile.avatar_url}`}
+                        alt="Avatar"
+                        className="w-32 h-32 rounded-full object-cover"
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                        }}
+                      />
                     ) : (
-                      <>
-                        {console.log("No avatar URL found")} {/* Debug log */}
-                        <svg className="w-16 h-16 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-                        </svg>
-                      </>
+                      <svg className="w-16 h-16 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                      </svg>
                     )}
                   </div>
                   <label className="absolute -bottom-2 -right-2 bg-orange-500 text-white rounded-full p-3 cursor-pointer hover:bg-orange-600 transition-colors shadow-lg">
@@ -448,28 +461,28 @@ export default function ProfilePage() {
                   )}
                 </div>
 
-          <div>
+                <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-3">
                     Universidad *
                   </label>
-            <input
-              {...register("university")}
+                  <input
+                    {...register("university")}
                     className="w-full px-4 py-4 border border-gray-300 rounded-xl text-lg font-medium bg-gray-50 cursor-not-allowed"
                     placeholder="Ej. Universidad CEU"
                     disabled
                     readOnly
                     title="La universidad se detecta automáticamente desde tu email y no se puede editar"
-            />
-            <p className="text-sm text-gray-500 mt-2 flex items-center space-x-1">
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd"/>
-              </svg>
-              <span>Detectada automáticamente desde tu email</span>
-            </p>
+                  />
+                  <p className="text-sm text-gray-500 mt-2 flex items-center space-x-1">
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd"/>
+                    </svg>
+                    <span>Detectada automáticamente desde tu email</span>
+                  </p>
                   {errors.university && (
                     <p className="text-red-500 text-sm mt-2">{errors.university.message}</p>
                   )}
-          </div>
+                </div>
 
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-3">
@@ -524,31 +537,31 @@ export default function ProfilePage() {
               {successMsg && (
                 <div className="bg-gray-50 border border-green-200 rounded-xl p-4">
                   <p className="text-green-800 text-sm font-medium">{successMsg}</p>
-          </div>
+                </div>
               )}
               {avatarMsg && (
                 <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
                   <p className="text-blue-800 text-sm font-medium">{avatarMsg}</p>
-          </div>
+                </div>
               )}
               {serverError && (
                 <div className="bg-red-50 border border-red-200 rounded-xl p-4">
                   <p className="text-red-800 text-sm font-medium">{serverError}</p>
-        </div>
+                </div>
               )}
 
               {/* Submit Button */}
               <div className="pt-6">
-          <button
-            type="submit"
+                <button
+                  type="submit"
                   disabled={saving || !isDirty}
                   className="w-full bg-orange-500 text-white py-4 px-8 rounded-xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-orange-600 transition-colors text-lg shadow-lg"
-          >
+                >
                   {saving ? "Guardando..." : "Guardar Perfil"}
-          </button>
-        </div>
-      </form>
-    </div>
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       </div>
     </DesktopLayout>

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -38,6 +38,13 @@ class RideCreate(RideBase):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class PassengerInfo(BaseModel):
+    """Simplified passenger info for ride responses"""
+    id: int
+    name: str
+    avatar_url: Optional[str] = None
+
+
 class RideOut(RideBase):
     id: int
     driver_id: int
@@ -52,6 +59,9 @@ class RideOut(RideBase):
     is_active: bool
     created_at: datetime
     driver_average_rating: Optional[float] = None
+    reserved_by_user_id: Optional[int] = None  # ID of the first passenger with confirmed booking
+    passengers: List[PassengerInfo] = []  # List of all confirmed passengers
+    passengers_ids: List[int] = []  # List of all confirmed passenger IDs
 
     class Config:
         from_attributes = True
@@ -61,3 +71,12 @@ class RideSearch(BaseModel):
     departure_city: Optional[str] = None
     destination_city: Optional[str] = None
     departure_date: Optional[datetime] = None
+
+
+class Passenger(BaseModel):
+    booking_id: int
+    passenger_id: int
+    passenger_name: str
+    passenger_avatar: Optional[str] = None
+    has_rated: bool = False
+    can_rate: bool = False

@@ -13,14 +13,14 @@ type ActivityMapPreviewProps = {
   className?: string;
 };
 
-const darkUberStyle = [
-  { elementType: "geometry", stylers: [{ color: "#0f0f0f" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#757575" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#0f0f0f" }] },
+const lightMapStyle = [
+  { elementType: "geometry", stylers: [{ color: "#ffffff" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#333333" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#ffffff" }] },
   {
     featureType: "administrative",
     elementType: "geometry.stroke",
-    stylers: [{ color: "#1c1c1c" }],
+    stylers: [{ color: "#cccccc" }],
   },
   {
     featureType: "poi",
@@ -29,14 +29,14 @@ const darkUberStyle = [
   {
     featureType: "road",
     elementType: "geometry",
-    stylers: [{ color: "#1f1f1f" }],
+    stylers: [{ color: "#f5f5f5" }],
   },
   {
     featureType: "road",
     elementType: "geometry.stroke",
-    stylers: [{ color: "#292929" }],
+    stylers: [{ color: "#e0e0e0" }],
   },
-  { featureType: "water", stylers: [{ color: "#000000" }] },
+  { featureType: "water", stylers: [{ color: "#e3f2fd" }] },
 ];
 
 export default function ActivityMapPreview({
@@ -70,28 +70,16 @@ export default function ActivityMapPreview({
       lat?: number | null,
       lng?: number | null
     ): Promise<google.maps.LatLngLiteral | null> => {
+      // Always prefer coordinates if provided (backend should always provide these)
       if (typeof lat === "number" && typeof lng === "number") {
         return { lat, lng };
       }
 
-      if (!label) return null;
-
-      return new Promise((resolve) => {
-        const GeocoderConstructor = window.google?.maps?.Geocoder;
-        if (!GeocoderConstructor) {
-          resolve(null);
-          return;
-        }
-        const geocoder = new GeocoderConstructor();
-        geocoder.geocode({ address: label }, (results, status) => {
-          if (status === "OK" && results && results[0]?.geometry?.location) {
-            const location = results[0].geometry.location;
-            resolve({ lat: location.lat(), lng: location.lng() });
-          } else {
-            resolve(null);
-          }
-        });
-      });
+      // If coordinates are missing, return null instead of trying to geocode
+      // This avoids requiring the Geocoding API
+      // The backend should always provide coordinates for rides
+      console.warn(`Missing coordinates for ${label}. Backend should provide departure_lat, departure_lng, destination_lat, destination_lng.`);
+      return null;
     };
 
     loadGoogleMaps()
@@ -100,7 +88,7 @@ export default function ActivityMapPreview({
 
         map = new window.google.maps.Map(mapRef.current, {
           disableDefaultUI: true,
-          styles: darkUberStyle,
+          styles: lightMapStyle,
           gestureHandling: "none",
         });
 
@@ -131,13 +119,13 @@ export default function ActivityMapPreview({
             new window.google.maps.Marker({
               position: origin,
               map: map!,
-              icon: { ...iconBase, strokeColor: "#7fffd4", fillColor: "#0f0f0f", fillOpacity: 1 },
+              icon: { ...iconBase, strokeColor: "#22c55e", fillColor: "#ffffff", fillOpacity: 1 },
               title: originName,
             }),
             new window.google.maps.Marker({
               position: destination,
               map: map!,
-              icon: { ...iconBase, strokeColor: "#ff69b4", fillColor: "#0f0f0f", fillOpacity: 1 },
+              icon: { ...iconBase, strokeColor: "#86cc49", fillColor: "#ffffff", fillOpacity: 1 },
               title: destinationName,
             }),
           ];

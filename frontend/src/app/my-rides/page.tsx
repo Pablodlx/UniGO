@@ -6,7 +6,8 @@ import ConfirmModal from "@/components/ConfirmModal";
 import RatingModal from "@/components/RatingModal";
 import PassengerSelectionModal, { Passenger } from "@/components/PassengerSelectionModal";
 import ActivityMapPreview from "@/components/ActivityMapPreview";
-import { getToken, Ride, getMyRides, getMyBookings, cancelRide, cancelBooking, getRideHistory, RideHistoryItem, createRating } from "@/lib/api";
+// Chat removed temporarily
+import { getToken, Ride, getMyRides, getMyBookings, cancelRide, cancelBooking, getRideHistory, RideHistoryItem, createRating, getCurrentUserId } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -50,10 +51,15 @@ export default function MyRidesPage() {
     rideId: null,
     passengers: [],
   });
+  // Chat removed temporarily
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
 
   useEffect(() => {
     const token = getToken();
     setIsLoggedIn(!!token);
+    
+    const userId = getCurrentUserId();
+    setCurrentUserId(userId);
     
     if (token) {
       fetchMyRides();
@@ -251,7 +257,17 @@ export default function MyRidesPage() {
     }
   };
 
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const formatDate = (dateString: string) => {
+    if (!mounted) {
+      // Return a placeholder during SSR to avoid hydration mismatch
+      return "";
+    }
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', { 
       weekday: 'short', 
@@ -464,79 +480,69 @@ export default function MyRidesPage() {
                   </Link>
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-6">
                   {displayedRides.map((ride) => (
                     <div
                       key={ride.id}
-                      className="border border-gray-200 rounded-xl p-6 hover:shadow-md transition-shadow"
+                      className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-md transition-shadow hover:shadow-xl"
                     >
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center space-x-3 mb-3">
-                            {getStatusBadge(ride.is_active)}
+                      <ActivityMapPreview
+                        originName={ride.departure_city}
+                        destinationName={ride.destination_city}
+                        originLat={ride.departure_lat}
+                        originLng={ride.departure_lng}
+                        destinationLat={ride.destination_lat}
+                        destinationLng={ride.destination_lng}
+                        className="h-48"
+                      />
+                      <div className="p-6">
+                        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <div className="flex items-center gap-3 mb-3">
+                              {getStatusBadge(ride.is_active)}
+                            </div>
+                            <div className="text-sm text-gray-500 uppercase tracking-[0.3em]">
+                              {formatDate(ride.departure_date)} · {ride.departure_time}
+                            </div>
+                            <h3 className="text-2xl font-semibold text-gray-900">{ride.destination_city}</h3>
+                            <p className="text-sm text-gray-500">
+                              {ride.departure_city} → {ride.destination_city}
+                            </p>
                           </div>
-                          
-                          <div className="flex items-start space-x-6 mb-4">
-                            <div className="flex items-center space-x-2">
-                              <div className="text-2xl font-bold text-gray-800">{ride.departure_time}</div>
-                              <div>
-                                <div className="text-lg font-semibold text-gray-900">{ride.departure_city}</div>
-                                <div className="text-sm text-gray-500">{formatDate(ride.departure_date)}</div>
-                              </div>
-                            </div>
-                            
-                            <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-                            </svg>
-                            
-                            <div className="flex items-center space-x-3">
-                              <div>
-                                <div className="text-lg font-semibold text-gray-900">{ride.destination_city}</div>
-                              </div>
-                              {ride.arrival_time && (
-                                <div className="text-2xl font-bold text-gray-800">{ride.arrival_time}</div>
-                              )}
-                            </div>
+                          <div className="text-right">
+                            <p className="text-xs uppercase tracking-[0.3em] text-gray-400">Precio por asiento</p>
+                            <p className="text-2xl font-semibold text-gray-900">
+                              {ride.price_per_seat.toFixed(2)} €
+                            </p>
                           </div>
-                          
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-600">
-                            <div>
-                              <span className="font-medium text-gray-900">Asientos disponibles:</span> {ride.available_seats}
-                            </div>
-                            <div>
-                              <span className="font-medium text-gray-900">Precio por asiento:</span> {ride.price_per_seat.toFixed(2)} €
-                            </div>
-                            <div>
-                              <span className="font-medium text-gray-900">Vehículo:</span> {
-                                ride.vehicle_brand || ride.vehicle_color 
-                                  ? [ride.vehicle_brand, ride.vehicle_color].filter(Boolean).join(' ') 
-                                  : 'N/A'
-                              }
-                            </div>
-                            {ride.estimated_duration_minutes ? (
-                              <div>
-                                <span className="font-medium text-gray-900">Duración estimada:</span> {formatDuration(ride.estimated_duration_minutes)}
-                              </div>
-                            ) : (
-                              <div>
-                                <span className="font-medium text-gray-900">Creado:</span> {new Date(ride.created_at).toLocaleDateString()}
-                              </div>
-                            )}
+                        </div>
+
+                        <div className="mt-6 grid grid-cols-1 gap-4 text-sm text-gray-600 md:grid-cols-3">
+                          <div>
+                            <span className="font-medium text-gray-900">Asientos disponibles:</span> {ride.available_seats}
+                          </div>
+                          <div>
+                            <span className="font-medium text-gray-900">Vehículo:</span>{" "}
+                            {ride.vehicle_brand || ride.vehicle_color
+                              ? [ride.vehicle_brand, ride.vehicle_color].filter(Boolean).join(" ")
+                              : "N/A"}
                           </div>
                           {ride.estimated_duration_minutes && (
-                            <div className="mt-2 text-sm text-gray-600">
-                              <span className="font-medium text-gray-900">Creado:</span> {new Date(ride.created_at).toLocaleDateString()}
-                            </div>
-                          )}
-                          
-                          {ride.additional_details && (
-                            <div className="mt-3 text-sm text-gray-600 bg-gray-50 rounded-lg p-3">
-                              <span className="font-medium text-gray-900">Details:</span> {ride.additional_details}
+                            <div>
+                              <span className="font-medium text-gray-900">Duración:</span>{" "}
+                              {formatDuration(ride.estimated_duration_minutes)}
                             </div>
                           )}
                         </div>
+
+                        {ride.additional_details && (
+                          <div className="mt-4 rounded-xl bg-gray-50 p-4 text-sm text-gray-600">
+                            <span className="font-medium text-gray-900">Detalles:</span> {ride.additional_details}
+                          </div>
+                        )}
+
                         {ride.is_active && (
-                          <div className="ml-6 flex items-center">
+                          <div className="mt-6 flex justify-end gap-3">
                             <button
                               onClick={() => handleCancelRide(ride.id)}
                               className="px-4 py-2 bg-red-500 text-white rounded-lg font-medium hover:bg-red-600 transition-colors text-sm"
@@ -568,84 +574,70 @@ export default function MyRidesPage() {
                   </Link>
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-6">
                   {bookings.map((ride) => (
                     <div
                       key={ride.id}
-                      className="border border-gray-200 rounded-xl p-6 hover:shadow-md transition-shadow"
+                      className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-md transition-shadow hover:shadow-xl"
                     >
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center space-x-2 mb-3">
-                            <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
-                              Reservado
-                            </span>
+                      <ActivityMapPreview
+                        originName={ride.departure_city}
+                        destinationName={ride.destination_city}
+                        originLat={ride.departure_lat}
+                        originLng={ride.departure_lng}
+                        destinationLat={ride.destination_lat}
+                        destinationLng={ride.destination_lng}
+                        className="h-48"
+                      />
+                      <div className="p-6">
+                        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <div className="flex items-center gap-3 mb-3">
+                              <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
+                                Reservado
+                              </span>
+                            </div>
+                            <div className="text-sm text-gray-500 uppercase tracking-[0.3em]">
+                              {formatDate(ride.departure_date)} · {ride.departure_time}
+                            </div>
+                            <h3 className="text-2xl font-semibold text-gray-900">{ride.destination_city}</h3>
+                            <p className="text-sm text-gray-500">
+                              {ride.departure_city} → {ride.destination_city}
+                            </p>
                           </div>
-                          
-                          <div className="flex items-start space-x-6 mb-4">
-                            <div className="flex items-center space-x-2">
-                              <div className="text-2xl font-bold text-gray-800">{ride.departure_time}</div>
-                              <div>
-                                <div className="text-lg font-semibold text-gray-900">{ride.departure_city}</div>
-                                <div className="text-sm text-gray-500">{formatDate(ride.departure_date)}</div>
-                              </div>
-                            </div>
-                            
-                            <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-                            </svg>
-                            
-                            <div className="flex items-center space-x-3">
-                              <div>
-                                <div className="text-lg font-semibold text-gray-900">{ride.destination_city}</div>
-                              </div>
-                              {ride.arrival_time && (
-                                <div className="text-2xl font-bold text-gray-800">{ride.arrival_time}</div>
-                              )}
-                            </div>
+                          <div className="text-right">
+                            <p className="text-xs uppercase tracking-[0.3em] text-gray-400">Precio por asiento</p>
+                            <p className="text-2xl font-semibold text-gray-900">
+                              {ride.price_per_seat.toFixed(2)} €
+                            </p>
                           </div>
-                          
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-600">
-                            <div>
-                              <span className="font-medium text-gray-900">Conductor:</span> {ride.driver_name}
-                            </div>
-                            <div>
-                              <span className="font-medium text-gray-900">Asientos disponibles:</span> {ride.available_seats}
-                            </div>
-                            <div>
-                              <span className="font-medium text-gray-900">Precio por asiento:</span> {ride.price_per_seat.toFixed(2)} €
-                            </div>
-                            {ride.estimated_duration_minutes ? (
-                              <div>
-                                <span className="font-medium text-gray-900">Duración estimada:</span> {formatDuration(ride.estimated_duration_minutes)}
-                              </div>
-                            ) : (
-                              <div>
-                                <span className="font-medium text-gray-900">Vehículo:</span> {
-                                ride.vehicle_brand || ride.vehicle_color 
-                                  ? [ride.vehicle_brand, ride.vehicle_color].filter(Boolean).join(' ') 
-                                  : 'N/A'
-                              }
-                              </div>
-                            )}
+                        </div>
+
+                        <div className="mt-6 grid grid-cols-1 gap-4 text-sm text-gray-600 md:grid-cols-3">
+                          <div>
+                            <span className="font-medium text-gray-900">Conductor:</span> {ride.driver_name}
+                          </div>
+                          <div>
+                            <span className="font-medium text-gray-900">Vehículo:</span>{" "}
+                            {ride.vehicle_brand || ride.vehicle_color
+                              ? [ride.vehicle_brand, ride.vehicle_color].filter(Boolean).join(" ")
+                              : "N/A"}
                           </div>
                           {ride.estimated_duration_minutes && (
-                            <div className="mt-2 text-sm text-gray-600">
-                              <span className="font-medium text-gray-900">Vehículo:</span> {
-                                ride.vehicle_brand || ride.vehicle_color 
-                                  ? [ride.vehicle_brand, ride.vehicle_color].filter(Boolean).join(' ') 
-                                  : 'N/A'
-                              }
-                            </div>
-                          )}
-                          
-                          {ride.additional_details && (
-                            <div className="mt-3 text-sm text-gray-600 bg-gray-50 rounded-lg p-3">
-                              <span className="font-medium text-gray-900">Details:</span> {ride.additional_details}
+                            <div>
+                              <span className="font-medium text-gray-900">Duración:</span>{" "}
+                              {formatDuration(ride.estimated_duration_minutes)}
                             </div>
                           )}
                         </div>
-                        <div className="ml-6 flex items-center">
+
+                        {ride.additional_details && (
+                          <div className="mt-4 rounded-xl bg-gray-50 p-4 text-sm text-gray-600">
+                            <span className="font-medium text-gray-900">Detalles:</span> {ride.additional_details}
+                          </div>
+                        )}
+
+                        <div className="mt-6 flex justify-end gap-3">
                           <button
                             onClick={() => handleCancelBooking(ride.id)}
                             className="px-4 py-2 bg-red-500 text-white rounded-lg font-medium hover:bg-red-600 transition-colors text-sm"

@@ -10,7 +10,7 @@ from alembic import context
 from app.db.session import DATABASE_URL
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from app.auth.models import EmailCode, User, Rating, Booking, Ride  # noqa: F401
+from app.auth.models import EmailCode, User, Rating, Booking, Ride, Message  # noqa: F401
 from app.core.config import settings
 from app.db.session import Base
 

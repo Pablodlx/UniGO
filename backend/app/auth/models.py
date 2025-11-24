@@ -161,3 +161,20 @@ class FavoriteRide(Base):
     
     # Relationship to User
     user: Mapped["User"] = relationship("User", back_populates="favorite_rides")
+
+
+class Message(Base):
+    __tablename__ = "messages"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    trip_id: Mapped[int] = mapped_column(ForeignKey("rides.id"), nullable=False, index=True)
+    sender_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    receiver_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False, index=True
+    )
+    
+    # Relationships
+    trip: Mapped["Ride"] = relationship("Ride", foreign_keys=[trip_id])
+    sender: Mapped["User"] = relationship("User", foreign_keys=[sender_id])
+    receiver: Mapped["User"] = relationship("User", foreign_keys=[receiver_id])

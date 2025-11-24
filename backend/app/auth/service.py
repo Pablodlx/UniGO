@@ -1,3 +1,4 @@
+import re
 import secrets
 from datetime import UTC, datetime, timedelta
 
@@ -122,10 +123,63 @@ def _detect_university_from_email(email: str) -> str | None:
 
 
 def _is_allowed_domain(domain: str) -> bool:
-    if not settings.allowed_email_domains:
+    """
+    Check if email domain is allowed (university domains only).
+    Allows:
+    - Domains matching university patterns (*.edu, *.edu.es, *.university, *.uni.*)
+    - Domains in the whitelist (settings.allowed_email_domains)
+    - Domains that match known university patterns in EMAIL_DOMAIN_TO_UNIVERSITY
+    
+    Rejects:
+    - Personal email providers (gmail, outlook, hotmail, yahoo, etc.)
+    """
+    # Personal email provider blacklist
+    personal_email_providers = [
+        "gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "yahoo.es",
+        "icloud.com", "protonmail.com", "aol.com", "mail.com", "zoho.com",
+        "yandex.com", "gmx.com", "live.com", "msn.com", "me.com"
+    ]
+    
+    domain_lower = domain.lower()
+    base_domain = _get_base_domain(domain_lower)
+    
+    # Reject personal email providers
+    if base_domain in personal_email_providers or any(domain_lower.endswith(f".{provider}") for provider in personal_email_providers):
+        return False
+    
+    # Check if domain matches university patterns
+    university_patterns = [
+        r"\.edu$",           # *.edu
+        r"\.edu\.es$",        # *.edu.es
+        r"\.edu\.[a-z]{2,}$", # *.edu.* (any country code)
+        r"\.university$",     # *.university
+        r"\.uni\.[a-z]{2,}$", # *.uni.*
+        r"univ\.[a-z]{2,}$",  # univ.*
+    ]
+    
+    # Check if domain matches any university pattern
+    for pattern in university_patterns:
+        if re.search(pattern, domain_lower):
+            return True
+    
+    # Check if domain is in the whitelist (if configured)
+    if settings.allowed_email_domains:
+        if any(domain_lower == d or domain_lower.endswith(f".{d}") for d in settings.allowed_email_domains):
+            return True
+    
+    # Check if domain is in the known university mapping
+    if base_domain in EMAIL_DOMAIN_TO_UNIVERSITY:
         return True
-    # permite subdominios: alumnos.ugr.es válido si ugr.es está permitido
-    return any(domain == d or domain.endswith(f".{d}") for d in settings.allowed_email_domains)
+    if domain_lower in EMAIL_DOMAIN_TO_UNIVERSITY:
+        return True
+    # Check for subdomains (e.g., alumnos.ugr.es -> ugr.es)
+    for allowed_domain in EMAIL_DOMAIN_TO_UNIVERSITY.keys():
+        if domain_lower.endswith(f".{allowed_domain}") or domain_lower == allowed_domain:
+            return True
+    
+    # If no whitelist is configured and domain doesn't match patterns, reject
+    # (This maintains security - only explicit university domains are allowed)
+    return False
 
 
 def _issue_email_code(db: Session, email: str, purpose: str = "verify_email") -> str:

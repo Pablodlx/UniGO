@@ -1,6 +1,9 @@
 "use client";
 
-import { Ride } from "@/lib/api";
+import { useState, useEffect } from "react";
+import { Ride, getCurrentUserId, getMyBookings } from "@/lib/api";
+import ActivityMapPreview from "@/components/ActivityMapPreview";
+// Chat removed temporarily
 
 interface RideDetailProps {
   ride: Ride;
@@ -11,18 +14,46 @@ interface RideDetailProps {
 }
 
 export default function RideDetail({ ride, onBack, onContact, bookingSuccess = false, onReturnHome }: RideDetailProps) {
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!ride || !ride.id) {
+      return;
+    }
+
+    let cancelled = false;
+    const userId = getCurrentUserId();
+    setCurrentUserId(userId);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ride]);
+
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-    const months = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-    return `${days[date.getDay()]}, ${date.getDate()} de ${months[date.getMonth()]}`;
+    if (!mounted || !dateString) return ""; // Return empty string during SSR or if dateString is missing
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return ""; // Invalid date
+      const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+      const months = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+      return `${days[date.getDay()]}, ${date.getDate()} de ${months[date.getMonth()]}`;
+    } catch {
+      return "";
+    }
   };
 
   const formatTime = (timeString: string) => {
     return timeString;
   };
 
-  const formatDuration = (minutes: number) => {
+  const formatDuration = (minutes: number | undefined | null) => {
+    if (!minutes || minutes < 0) return "";
     if (minutes < 60) {
       return `${minutes} minutos`;
     }
@@ -80,6 +111,23 @@ export default function RideDetail({ ride, onBack, onContact, bookingSuccess = f
     );
   }
 
+  // Early return if ride is null or missing required fields
+  if (!ride || !ride.id) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-gray-600 text-lg mb-4">Error: No se pudo cargar la información del viaje.</p>
+          <button
+            onClick={onBack}
+            className="px-6 py-2 bg-orange-500 text-white rounded-lg font-medium hover:bg-orange-600 transition-colors"
+          >
+            Volver
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -117,7 +165,7 @@ export default function RideDetail({ ride, onBack, onContact, bookingSuccess = f
       <div className="max-w-6xl mx-auto px-8 py-12">
         {/* Date Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-800">{formatDate(ride.departure_date)}</h1>
+          <h1 className="text-3xl font-bold text-gray-800">{formatDate(ride.departure_date || "")}</h1>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -128,16 +176,16 @@ export default function RideDetail({ ride, onBack, onContact, bookingSuccess = f
               <div className="space-y-6">
                 {/* Departure */}
                 <div className="flex items-start space-x-4">
-                  <div className="text-2xl font-bold text-gray-800">
-                    {formatTime(ride.departure_time)}
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-2 text-gray-900 font-semibold mb-1">
-                      <svg className="w-5 h-5 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd"/>
-                      </svg>
-                      <span>{ride.departure_city}</span>
+                    <div className="text-2xl font-bold text-gray-800">
+                      {formatTime(ride.departure_time || "")}
                     </div>
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-2 text-gray-900 font-semibold mb-1">
+                        <svg className="w-5 h-5 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd"/>
+                        </svg>
+                        <span>{ride.departure_city || "Origen no especificado"}</span>
+                      </div>
                     <div className="text-sm text-gray-600">
                       {ride.vehicle_brand || ride.vehicle_color 
                         ? [ride.vehicle_brand, ride.vehicle_color].filter(Boolean).join(' ')
@@ -156,6 +204,19 @@ export default function RideDetail({ ride, onBack, onContact, bookingSuccess = f
               </div>
             </div>
 
+            {/* Map Preview */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <ActivityMapPreview
+                originName={ride.departure_city || ""}
+                destinationName={ride.destination_city || ""}
+                originLat={ride.departure_lat ?? undefined}
+                originLng={ride.departure_lng ?? undefined}
+                destinationLat={ride.destination_lat ?? undefined}
+                destinationLng={ride.destination_lng ?? undefined}
+                className="h-64"
+              />
+            </div>
+
             {/* Driver Details Card */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
               <div className="space-y-6">
@@ -167,7 +228,7 @@ export default function RideDetail({ ride, onBack, onContact, bookingSuccess = f
                     </svg>
                   </div>
                   <div className="flex-1">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-1">{ride.driver_name}</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-1">{ride.driver_name || "Conductor"}</h3>
                     {ride.driver_university && (
                       <p className="text-gray-600 mb-3">{ride.driver_university}</p>
                     )}
@@ -192,17 +253,19 @@ export default function RideDetail({ ride, onBack, onContact, bookingSuccess = f
                 </div>
 
                 {/* Contact Button */}
-                <div className="pt-4">
-                  <button
-                    onClick={onContact}
-                    className="w-full bg-orange-500 text-white px-6 py-4 rounded-xl font-semibold hover:bg-orange-600 transition-colors flex items-center justify-center space-x-2 shadow-md"
-                  >
-                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                      <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/>
-                      <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/>
-                    </svg>
-                    <span>Reservar</span>
-                  </button>
+                <div className="pt-4 space-y-3">
+                  {ride && currentUserId !== ride.driver_id && !(Array.isArray(ride.passengers_ids) && ride.passengers_ids.includes(currentUserId || 0)) && (
+                    <button
+                      onClick={onContact}
+                      className="w-full bg-orange-500 text-white px-6 py-4 rounded-xl font-semibold hover:bg-orange-600 transition-colors flex items-center justify-center space-x-2 shadow-md"
+                    >
+                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/>
+                        <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/>
+                      </svg>
+                      <span>Reservar</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -219,7 +282,7 @@ export default function RideDetail({ ride, onBack, onContact, bookingSuccess = f
 
                 {/* Departure Summary */}
                 <div>
-                  <div className="text-lg font-semibold text-gray-900">{formatTime(ride.departure_time)} {ride.departure_city}</div>
+                  <div className="text-lg font-semibold text-gray-900">{formatTime(ride.departure_time || "")} {ride.departure_city || ""}</div>
                   <div className="text-sm text-gray-600">
                     {ride.vehicle_brand || ride.vehicle_color 
                       ? [ride.vehicle_brand, ride.vehicle_color].filter(Boolean).join(' ')
@@ -244,7 +307,7 @@ export default function RideDetail({ ride, onBack, onContact, bookingSuccess = f
                       </svg>
                     </div>
                     <div className="flex-1">
-                      <div className="text-gray-900 font-medium">{ride.driver_name}</div>
+                      <div className="text-gray-900 font-medium">{ride.driver_name || "Conductor"}</div>
                       {ride.driver_university && (
                         <div className="text-sm text-gray-500">{ride.driver_university}</div>
                       )}
@@ -255,26 +318,35 @@ export default function RideDetail({ ride, onBack, onContact, bookingSuccess = f
                 {/* Price and Passengers */}
                 <div className="bg-orange-50 rounded-xl p-4 border border-orange-200">
                   <div className="flex items-center justify-between">
-                    <span className="text-gray-700 font-medium">1 pasajero</span>
-                    <span className="text-2xl font-bold text-orange-600">{ride.price_per_seat.toFixed(2)} €</span>
+                    <span className="text-gray-700 font-medium">
+                      {Array.isArray(ride.passengers) && ride.passengers.length > 0
+                        ? `${ride.passengers.length} pasajero${ride.passengers.length > 1 ? 's' : ''}`
+                        : '0 pasajeros'}
+                    </span>
+                    <span className="text-2xl font-bold text-orange-600">{(ride.price_per_seat || 0).toFixed(2)} €</span>
                   </div>
                 </div>
 
                 {/* Reserve Button */}
-                <button
-                  onClick={onContact}
-                  className="w-full bg-orange-500 text-white px-6 py-4 rounded-xl font-semibold hover:bg-orange-600 transition-colors flex items-center justify-center space-x-2 shadow-lg"
-                >
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd"/>
-                  </svg>
-                  <span>Reservar</span>
-                </button>
+                <div className="space-y-3">
+                  {ride && currentUserId !== ride.driver_id && !(Array.isArray(ride.passengers_ids) && ride.passengers_ids.includes(currentUserId || 0)) && (
+                    <button
+                      onClick={onContact}
+                      className="w-full bg-orange-500 text-white px-6 py-4 rounded-xl font-semibold hover:bg-orange-600 transition-colors flex items-center justify-center space-x-2 shadow-lg"
+                    >
+                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd"/>
+                      </svg>
+                      <span>Reservar</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
+
     </div>
   );
 }

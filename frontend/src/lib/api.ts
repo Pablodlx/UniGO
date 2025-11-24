@@ -6,6 +6,23 @@ export function getToken() {
   return localStorage.getItem("token"); // cambia la clave si usas otra
 }
 
+export function getCurrentUserId(): number | null {
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+    }).join(''));
+    const decoded = JSON.parse(jsonPayload);
+    return parseInt(decoded.sub);
+  } catch (error) {
+    console.error("Error decoding token:", error);
+    return null;
+  }
+}
+
 export function setToken(token: string) {
   if (typeof window === "undefined") return;
   localStorage.setItem("token", token);
@@ -68,9 +85,10 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
     console.error("JSON parse error:", e, "Response:", text);
     throw new Error(`Invalid JSON response: ${text}`);
   }
-  } catch (error: any) {
-    console.error("Fetch error:", error, "URL:", url, "Error message:", error.message);
-    if (error.message.includes("Failed to fetch") || error.message === "Failed to fetch") {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error("Fetch error:", error, "URL:", url, "Error message:", errorMessage);
+    if (errorMessage.includes("Failed to fetch") || errorMessage === "Failed to fetch") {
       throw new Error(`Network error: Could not reach ${url}. Is the backend running?`);
     }
     throw error;
@@ -129,13 +147,45 @@ export type ProfilePayload = {
 };
 
 export async function getProfile() {
-  return fetchJson<any>(`${BASE}/me/profile`, {
+  return fetchJson<{
+    id: number;
+    email: string;
+    full_name: string;
+    university?: string;
+    degree?: string;
+    course?: number;
+    home_address?: {
+      formatted_address: string;
+      place_id: string;
+      lat: number;
+      lng: number;
+    };
+    avatar_url?: string;
+    average_rating: number | null;
+    rating_count: number;
+  }>(`${BASE}/me/profile`, {
     headers: { ...authHeaders() },
   });
 }
 
 export async function updateProfile(payload: ProfilePayload) {
-  return fetchJson<any>(`${BASE}/me/profile`, {
+  return fetchJson<{
+    id: number;
+    email: string;
+    full_name: string;
+    university?: string;
+    degree?: string;
+    course?: number;
+    home_address?: {
+      formatted_address: string;
+      place_id: string;
+      lat: number;
+      lng: number;
+    } | null;
+    avatar_url?: string;
+    average_rating: number | null;
+    rating_count: number;
+  }>(`${BASE}/me/profile`, {
     method: "PUT",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(payload),
@@ -145,7 +195,23 @@ export async function updateProfile(payload: ProfilePayload) {
 export async function uploadAvatar(file: File) {
   const form = new FormData();
   form.append("file", file);
-  return fetchJson<any>(`${BASE}/me/avatar`, {
+  return fetchJson<{
+    id: number;
+    email: string;
+    full_name: string;
+    university?: string;
+    degree?: string;
+    course?: number;
+    home_address?: {
+      formatted_address: string;
+      place_id: string;
+      lat: number;
+      lng: number;
+    } | null;
+    avatar_url?: string;
+    average_rating: number | null;
+    rating_count: number;
+  }>(`${BASE}/me/avatar`, {
     method: "POST",
     headers: { ...authHeaders() }, // NO pongas Content-Type, lo gestiona el browser
     body: form,
@@ -153,7 +219,16 @@ export async function uploadAvatar(file: File) {
 }
 
 // --- Utilidad para comprobar si el perfil está completo (RF-02) ---
-export function isProfileComplete(p: any): boolean {
+export function isProfileComplete(p: {
+  full_name?: string;
+  university?: string;
+  degree?: string;
+  course?: number;
+  home_address?: {
+    formatted_address?: string;
+    place_id?: string;
+  } | null;
+}): boolean {
   return Boolean(
     p &&
       p.full_name &&
@@ -168,6 +243,12 @@ export function isProfileComplete(p: any): boolean {
 }
 
 // --- Rides ---
+export interface PassengerInfo {
+  id: number;
+  name: string;
+  avatar_url?: string | null;
+}
+
 export interface Ride {
   id: number;
   driver_id: number;
@@ -191,6 +272,9 @@ export interface Ride {
   estimated_duration_minutes?: number;
   is_active: boolean;
   created_at: string;
+  reserved_by_user_id?: number | null; // ID of the first passenger with confirmed booking
+  passengers?: PassengerInfo[]; // List of all confirmed passengers
+  passengers_ids?: number[]; // List of all confirmed passenger IDs
 }
 
 export async function searchRides(params: {
@@ -380,6 +464,48 @@ export async function getFavoriteRide(favorite_id: number): Promise<FavoriteRide
 export async function deleteFavoriteRide(favorite_id: number): Promise<void> {
   return fetchJson<void>(`${BASE}/rides/favorites/${favorite_id}`, {
     method: "DELETE",
+    headers: { ...authHeaders() },
+  });
+}
+
+// --- Chat ---
+export interface ChatMessage {
+  id: number;
+  trip_id: number;
+  sender_id: number;
+  receiver_id: number;
+  sender_name: string;
+  receiver_name: string;
+  message: string;
+  timestamp: string;
+}
+
+export interface SendMessageRequest {
+  trip_id: number;
+  sender_id: number;
+  receiver_id: number;
+  message: string;
+}
+
+export async function sendMessage(data: SendMessageRequest): Promise<ChatMessage> {
+  return fetchJson<ChatMessage>(`${BASE}/chat/send`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+    },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getMessages(trip_id: number): Promise<ChatMessage[]> {
+  return fetchJson<ChatMessage[]>(`${BASE}/chat/messages?trip_id=${trip_id}`, {
+    headers: { ...authHeaders() },
+  });
+}
+
+export async function getRidePassengers(ride_id: number): Promise<Passenger[]> {
+  return fetchJson<Passenger[]>(`${BASE}/rides/${ride_id}/passengers`, {
     headers: { ...authHeaders() },
   });
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { Ride } from "@/lib/api";
 
 interface RideCardProps {
@@ -8,12 +9,22 @@ interface RideCardProps {
 }
 
 export default function RideCard({ ride, onClick }: RideCardProps) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const formatTime = (timeString: string) => {
     // timeString is in format HH:MM
     return timeString;
   };
 
   const formatDate = (dateString: string) => {
+    if (!mounted) {
+      // Return a placeholder during SSR to avoid hydration mismatch
+      return "";
+    }
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', { 
       weekday: 'short', 

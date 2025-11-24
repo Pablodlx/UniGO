@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import DesktopLayout from "@/components/DesktopLayout";
-import { getToken, Ride, getProfile } from "@/lib/api";
+import { getToken, Ride, getProfile, getRide } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import RideCard from "@/components/RideCard";
@@ -171,9 +171,32 @@ export default function Home() {
     }
   };
 
-  const handleRideClick = (ride: Ride) => {
-    setSelectedRide(ride);
-    setCurrentView('detail');
+  const handleRideClick = async (ride: Ride) => {
+    try {
+      // Reload ride from API to ensure we have all fields (passengers, passengers_ids, etc.)
+      const fullRide = await getRide(ride.id);
+      // Ensure passengers and passengers_ids are arrays (not undefined)
+      if (!fullRide.passengers) {
+        fullRide.passengers = [];
+      }
+      if (!fullRide.passengers_ids) {
+        fullRide.passengers_ids = [];
+      }
+      setSelectedRide(fullRide);
+      setCurrentView('detail');
+    } catch (error) {
+      console.error("Error loading ride details:", error);
+      // Fallback to using the ride from search results if API call fails
+      // Ensure passengers and passengers_ids are arrays
+      if (!ride.passengers) {
+        ride.passengers = [];
+      }
+      if (!ride.passengers_ids) {
+        ride.passengers_ids = [];
+      }
+      setSelectedRide(ride);
+      setCurrentView('detail');
+    }
   };
 
   const handleBackToResults = () => {
