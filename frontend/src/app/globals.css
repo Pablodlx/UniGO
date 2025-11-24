@@ -10,6 +10,16 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --color-orange-50: #f6fbf0;
+  --color-orange-100: #e7f6d8;
+  --color-orange-200: #d4efb7;
+  --color-orange-300: #b6e38a;
+  --color-orange-400: #9ad862;
+  --color-orange-500: #86cc49; /* pistachio */
+  --color-orange-600: #6da93b;
+  --color-orange-700: #598930;
+  --color-orange-800: #4a6f28;
+  --color-orange-900: #3b571f;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -39,7 +49,7 @@ body {
   visibility: visible !important;
   opacity: 1 !important;
   background: white !important;
-  border: 2px solid #fdba74 !important;
+  border: 2px solid #b6e38a !important;
   border-radius: 8px !important;
   box-shadow: 0 10px 25px rgba(0,0,0,0.2) !important;
 }
@@ -52,11 +62,11 @@ body {
 }
 
 [id$="-dropdown"] button:hover {
-  background: #fff7ed !important;
+  background: #f6fbf0 !important;
 }
 
 [id$="-dropdown"] button:active {
-  background: #ffedd5 !important;
+  background: #e7f6d8 !important;
 }
 
 /* Ensure dropdown items are clickable and don't cause layout shifts */

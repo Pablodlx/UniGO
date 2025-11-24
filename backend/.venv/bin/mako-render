@@ -1,4 +1,4 @@
-#!/home/alberto/UniGO/backend/.venv/bin/python3
+#!/Users/santiagobattat/UniGO/backend/.venv/bin/python3.12
 import sys
 from mako.cmd import cmdline
 if __name__ == '__main__':

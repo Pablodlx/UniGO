@@ -176,6 +176,10 @@ export interface Ride {
   driver_average_rating?: number;
   departure_city: string;
   destination_city: string;
+  departure_lat?: number | null;
+  departure_lng?: number | null;
+  destination_lat?: number | null;
+  destination_lng?: number | null;
   departure_date: string;
   departure_time: string;
   arrival_time?: string; // "HH:MM" format, calculated from departure_time + duration

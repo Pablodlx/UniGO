@@ -43,6 +43,10 @@ class RideOut(RideBase):
     driver_id: int
     driver_name: str
     driver_university: Optional[str]
+    departure_lat: Optional[float] = None
+    departure_lng: Optional[float] = None
+    destination_lat: Optional[float] = None
+    destination_lng: Optional[float] = None
     estimated_duration_minutes: Optional[int] = None
     arrival_time: Optional[str] = None  # "HH:MM" format, calculated from departure_time + duration
     is_active: bool

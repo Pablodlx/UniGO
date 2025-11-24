@@ -1,4 +1,4 @@
-#!/home/alberto/UniGO/backend/.venv/bin/python3
+#!/Users/santiagobattat/UniGO/backend/.venv/bin/python3.12
 import sys
 from rsa.util import private_to_public
 if __name__ == '__main__':
