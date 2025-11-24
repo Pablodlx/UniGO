@@ -89,6 +89,8 @@ class Ride(Base):
     driver: Mapped["User"] = relationship("User", back_populates="rides")
     # Relationship to Bookings
     bookings: Mapped[list["Booking"]] = relationship("Booking", back_populates="ride")
+    # Relationship to Group Messages
+    group_messages: Mapped[list["TripGroupMessage"]] = relationship("TripGroupMessage", back_populates="trip")
 
 
 class Booking(Base):
@@ -129,6 +131,22 @@ class Rating(Base):
     __table_args__ = (
         UniqueConstraint('booking_id', 'rater_id', name='uq_rating_booking_rater'),
     )
+
+
+class TripGroupMessage(Base):
+    __tablename__ = "trip_group_messages"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    trip_id: Mapped[int] = mapped_column(ForeignKey("rides.id"), nullable=False, index=True)
+    sender_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    sender_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    
+    # Relationships
+    trip: Mapped["Ride"] = relationship("Ride", back_populates="group_messages")
+    sender: Mapped["User"] = relationship("User")
 
 
 class FavoriteRide(Base):

@@ -509,3 +509,35 @@ export async function getRidePassengers(ride_id: number): Promise<Passenger[]> {
     headers: { ...authHeaders() },
   });
 }
+
+// --- Trip Group Chat ---
+export interface TripGroupMessage {
+  id: number;
+  trip_id: number;
+  sender_id: number;
+  sender_name: string;
+  message: string;
+  timestamp: string;
+}
+
+export interface SendTripMessageRequest {
+  trip_id: number;
+  message: string;
+}
+
+export async function sendTripMessage(data: SendTripMessageRequest): Promise<TripGroupMessage> {
+  return fetchJson<TripGroupMessage>(`${BASE}/trip-chat/send`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+    },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getTripMessages(trip_id: number): Promise<TripGroupMessage[]> {
+  return fetchJson<TripGroupMessage[]>(`${BASE}/trip-chat/messages?trip_id=${trip_id}`, {
+    headers: { ...authHeaders() },
+  });
+}

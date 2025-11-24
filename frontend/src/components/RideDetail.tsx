@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Ride, getCurrentUserId, getMyBookings } from "@/lib/api";
 import ActivityMapPreview from "@/components/ActivityMapPreview";
-// Chat removed temporarily
+import TripGroupChat from "@/components/TripGroupChat";
 
 interface RideDetailProps {
   ride: Ride;
@@ -16,6 +16,7 @@ interface RideDetailProps {
 export default function RideDetail({ ride, onBack, onContact, bookingSuccess = false, onReturnHome }: RideDetailProps) {
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [showGroupChat, setShowGroupChat] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -252,8 +253,9 @@ export default function RideDetail({ ride, onBack, onContact, bookingSuccess = f
                   </div>
                 </div>
 
-                {/* Contact Button */}
+                {/* Contact and Chat Buttons */}
                 <div className="pt-4 space-y-3">
+                  {/* Reserve Button - Only for non-drivers who haven't reserved */}
                   {ride && currentUserId !== ride.driver_id && !(Array.isArray(ride.passengers_ids) && ride.passengers_ids.includes(currentUserId || 0)) && (
                     <button
                       onClick={onContact}
@@ -266,6 +268,38 @@ export default function RideDetail({ ride, onBack, onContact, bookingSuccess = f
                       <span>Reservar</span>
                     </button>
                   )}
+                  
+                  {/* Chat Button - For driver and passengers when trip has reservations */}
+                  {ride && currentUserId && (() => {
+                    // Get passengers_ids - ensure it's an array
+                    const passengersIds = Array.isArray(ride.passengers_ids) 
+                      ? ride.passengers_ids 
+                      : ride.passengers_ids 
+                        ? [ride.passengers_ids] 
+                        : [];
+                    
+                    // Check conditions
+                    const hasPassengers = passengersIds.length > 0;
+                    const isDriver = currentUserId === ride.driver_id;
+                    const isPassenger = hasPassengers && passengersIds.includes(currentUserId);
+                    const canSeeChat = ride.is_active && hasPassengers && (isDriver || isPassenger);
+                    
+                    if (!canSeeChat) return null;
+                    
+                    return (
+                      <button
+                        onClick={() => {
+                          setShowGroupChat(true);
+                        }}
+                        className="w-full bg-orange-500 text-white px-6 py-4 rounded-xl font-semibold hover:bg-orange-600 transition-colors flex items-center justify-center space-x-2 shadow-md"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                        </svg>
+                        <span>Chat del Viaje</span>
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
@@ -347,6 +381,18 @@ export default function RideDetail({ ride, onBack, onContact, bookingSuccess = f
         </div>
       </div>
 
+      {/* Group Chat Modal */}
+      {showGroupChat && currentUserId && ride && (
+        <TripGroupChat
+          isOpen={showGroupChat}
+          onClose={() => {
+            console.log("Closing group chat");
+            setShowGroupChat(false);
+          }}
+          tripId={ride.id}
+          currentUserId={currentUserId}
+        />
+      )}
     </div>
   );
 }
