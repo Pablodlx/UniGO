@@ -27,7 +27,7 @@ export default function FavoritesListModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-50 pointer-events-none">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/20 backdrop-blur-md backdrop-saturate-200 pointer-events-none">
       <div 
         className="relative bg-white rounded-xl shadow-2xl max-w-2xl w-full border border-gray-200 transform transition-all pointer-events-auto"
         onClick={(e) => e.stopPropagation()}

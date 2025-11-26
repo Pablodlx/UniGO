@@ -59,6 +59,7 @@ class EmailCode(Base):
 class BookingStatus(str, enum.Enum):
     pending = "pending"
     confirmed = "confirmed"
+    rejected = "rejected"
     canceled = "canceled"
 
 
@@ -199,3 +200,22 @@ class Message(Base):
     trip: Mapped["Ride"] = relationship("Ride", foreign_keys=[trip_id])
     sender: Mapped["User"] = relationship("User", foreign_keys=[sender_id])
     receiver: Mapped["User"] = relationship("User", foreign_keys=[receiver_id])
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    receiver_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    type: Mapped[str] = mapped_column(String(50), nullable=False)  # e.g., "booking_confirmed"
+    ride_id: Mapped[Optional[int]] = mapped_column(ForeignKey("rides.id"), nullable=True, index=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False, index=True
+    )
+    read_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    
+    # Relationships
+    receiver: Mapped["User"] = relationship("User", foreign_keys=[receiver_id])
+    ride: Mapped[Optional["Ride"]] = relationship("Ride", foreign_keys=[ride_id])

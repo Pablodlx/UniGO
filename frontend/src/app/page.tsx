@@ -9,6 +9,8 @@ import RideCard from "@/components/RideCard";
 import RideDetail from "@/components/RideDetail";
 import AddressAutocomplete, { AddressValue } from "@/components/AddressAutocomplete";
 import { addToSearchHistory } from "@/utils/searchHistory";
+import { isProfileComplete } from "@/utils/isProfileComplete";
+import { useToast } from "@/hooks/useToast";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000/api";
 
@@ -18,6 +20,7 @@ export default function Home() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentView, setCurrentView] = useState<ViewState>('search');
   const [searchResults, setSearchResults] = useState<Ride[]>([]);
+  const { showToast, ToastComponent } = useToast();
   const [selectedRide, setSelectedRide] = useState<Ride | null>(null);
   const [searchParams, setSearchParams] = useState<{from: AddressValue | null, to: AddressValue | null, date: string} | null>(null);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
@@ -28,6 +31,18 @@ export default function Home() {
   const [toError, setToError] = useState<string>("");
   const [userUniversity, setUserUniversity] = useState<string | null>(null);
   const [userHomeAddress, setUserHomeAddress] = useState<AddressValue | null>(null);
+  const [userProfile, setUserProfile] = useState<{
+    full_name?: string | null;
+    university?: string | null;
+    degree?: string | null;
+    course?: number | null;
+    home_address?: {
+      formatted_address: string;
+      place_id: string;
+      lat: number;
+      lng: number;
+    } | null;
+  } | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -45,6 +60,15 @@ export default function Home() {
   const fetchUserProfile = async () => {
     try {
       const profile = await getProfile();
+      // Store full profile for validation
+      setUserProfile({
+        full_name: profile.full_name,
+        university: profile.university,
+        degree: profile.degree,
+        course: profile.course,
+        home_address: profile.home_address || undefined,
+      });
+      
       if (profile?.university) {
         setUserUniversity(profile.university);
       }
@@ -214,6 +238,12 @@ export default function Home() {
       return;
     }
 
+    // Validate profile BEFORE making the request
+    if (!isProfileComplete(userProfile)) {
+      showToast("Debes completar tu perfil para poder realizar esta acción.");
+      return;
+    }
+
     try {
       console.log("Booking ride:", selectedRide.id);
       const response = await fetch(`${BASE}/rides/${selectedRide.id}/book?seats=1`, {
@@ -239,10 +269,36 @@ export default function Home() {
         );
       } else {
         const errorText = await response.text();
+        let errorDetail = "";
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorDetail = errorJson.detail || "";
+        } catch {
+          errorDetail = errorText;
+        }
+        
+        // Check if it's a profile incomplete error (fallback - should not happen if validation works)
+        if (
+          response.status === 400 &&
+          (errorDetail === "Debes completar tu perfil antes de reservar un viaje." ||
+           errorDetail === "Debes completar tu perfil antes de publicar un viaje.")
+        ) {
+          showToast("Debes completar tu perfil para poder realizar esta acción.");
+          return;
+        }
         throw new Error(errorText || `Booking failed: ${response.status}`);
       }
     } catch (error: any) {
       console.error("Booking error:", error);
+      // Check if error message contains profile incomplete message (fallback)
+      const errorMessage = error?.message || "";
+      if (
+        errorMessage.includes("Debes completar tu perfil antes de reservar un viaje") ||
+        errorMessage.includes("Debes completar tu perfil antes de publicar un viaje")
+      ) {
+        showToast("Debes completar tu perfil para poder realizar esta acción.");
+        return;
+      }
       alert("❌ Failed to make booking. Please try again later.");
     }
   };
@@ -494,6 +550,7 @@ export default function Home() {
           )}
         </div>
       </div>
+      {ToastComponent}
     </DesktopLayout>
   );
 }

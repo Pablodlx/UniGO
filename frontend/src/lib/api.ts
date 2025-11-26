@@ -62,9 +62,27 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
       throw new Error(msg || "UNAUTHORIZED");
     }
     if (!r.ok) {
-      const text = await r.text().catch(() => "");
-      console.error("Request failed:", r.status, text);
-      throw new Error(text || `HTTP ${r.status}`);
+      let errorText = "";
+      try {
+        errorText = await r.text();
+      } catch (e) {
+        errorText = `HTTP ${r.status} ${r.statusText}`;
+      }
+      console.error("Request failed:", r.status, r.statusText, errorText);
+      
+      // Try to parse as JSON if possible
+      let errorMessage = errorText;
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorMessage = errorJson.detail || errorJson.message || errorText;
+      } catch {
+        // Not JSON, use text as is
+      }
+      
+      const error = new Error(errorMessage || `HTTP ${r.status}`);
+      (error as any).status = r.status;
+      (error as any).statusText = r.statusText;
+      throw error;
     }
   
   // Handle empty responses (like 204 No Content)
@@ -164,6 +182,30 @@ export async function getProfile() {
     average_rating: number | null;
     rating_count: number;
   }>(`${BASE}/me/profile`, {
+    headers: { ...authHeaders() },
+  });
+}
+
+export interface UserProfile {
+  email: string;
+  full_name: string | null;
+  university: string | null;
+  degree: string | null;
+  course: number | null;
+  home_address: {
+    formatted_address: string;
+    place_id: string;
+    lat: number;
+    lng: number;
+  } | null;
+  avatar_url: string | null;
+  average_rating: number | null;
+  rating_count: number;
+  average_rating_display: string;
+}
+
+export async function getUserProfile(userId: number): Promise<UserProfile> {
+  return fetchJson<UserProfile>(`${BASE}/me/user/${userId}/profile`, {
     headers: { ...authHeaders() },
   });
 }
@@ -275,6 +317,7 @@ export interface Ride {
   reserved_by_user_id?: number | null; // ID of the first passenger with confirmed booking
   passengers?: PassengerInfo[]; // List of all confirmed passengers
   passengers_ids?: number[]; // List of all confirmed passenger IDs
+  booking_status?: string | null; // Status of the booking: "pending", "confirmed", "rejected"
 }
 
 export async function searchRides(params: {
@@ -593,6 +636,156 @@ export interface UnreadNotificationsResponse {
 
 export async function getUnreadNotifications(): Promise<UnreadNotificationsResponse> {
   return fetchJson<UnreadNotificationsResponse>(`${BASE}/trip-chat/unread`, {
+    headers: { ...authHeaders() },
+  });
+}
+
+// --- Ride Passengers Management (Driver) ---
+export interface DriverPassengerInfo {
+  id: number;
+  full_name: string;
+  rating: number;
+  avatar_url: string | null;
+}
+
+// --- Ride Confirmed Users (reusing trip-chat logic) ---
+export interface ConfirmedUser {
+  id: number;
+  full_name: string;
+  rating: number | null;
+  avatar_url: string | null;
+  is_driver: boolean;
+}
+
+export async function getRideConfirmedUsers(rideId: number): Promise<ConfirmedUser[]> {
+  // Reutilizar el mismo fetch que usa el chat grupal
+  return fetchJson<ConfirmedUser[]>(`${BASE}/rides/${rideId}/confirmed-users`, {
+    headers: { ...authHeaders() },
+  });
+}
+
+export async function removePassengerFromRide(
+  rideId: number,
+  userId: number,
+  token: string
+): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL || BASE}/api/rides/${rideId}/passengers/${userId}`,
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    const data = await res.json();
+    return data?.success === true;
+  } catch (err) {
+    console.error("Error removing passenger:", err);
+    return false;
+  }
+}
+
+export async function freeSeat(rideId: number, token: string): Promise<{ success: boolean; available_seats?: number }> {
+  try {
+    const res = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL || BASE}/api/rides/${rideId}/free-seat`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (!res.ok) {
+      return { success: false };
+    }
+
+    const data = await res.json();
+    return data;
+  } catch (err) {
+    console.error("Error freeing seat:", err);
+    return { success: false };
+  }
+}
+
+// --- Pending Bookings (Driver) ---
+export interface PendingRequestInfo {
+  booking_id: number;
+  passenger_id: number;
+  passenger_name: string;
+  passenger_rating: number | null;
+  passenger_avatar_url: string | null;
+  seats: number;
+}
+
+export interface PendingRideInfo {
+  ride_id: number;
+  ride_title: string;
+  date: string;
+  requests: PendingRequestInfo[];
+}
+
+export interface PendingSummaryRide {
+  ride_id: number;
+  ride_title: string;
+  pending_count: number;
+}
+
+export interface PendingSummaryResponse {
+  total_pending: number;
+  rides: PendingSummaryRide[];
+}
+
+export async function getPendingBookingsForDriver(): Promise<PendingRideInfo[]> {
+  return fetchJson<PendingRideInfo[]>(`${BASE}/bookings/pending-for-driver`, {
+    headers: { ...authHeaders() },
+  });
+}
+
+export async function getPendingSummary(): Promise<PendingSummaryResponse> {
+  return fetchJson<PendingSummaryResponse>(`${BASE}/bookings/pending-summary`, {
+    headers: { ...authHeaders() },
+  });
+}
+
+export async function acceptBooking(bookingId: number): Promise<{ success: boolean; status: string; available_seats?: number }> {
+  return fetchJson<{ success: boolean; status: string; available_seats?: number }>(
+    `${BASE}/bookings/${bookingId}/accept`,
+    {
+      method: "POST",
+      headers: { ...authHeaders() },
+    }
+  );
+}
+
+export async function rejectBooking(bookingId: number): Promise<{ success: boolean; status: string }> {
+  return fetchJson<{ success: boolean; status: string }>(
+    `${BASE}/bookings/${bookingId}/reject`,
+    {
+      method: "POST",
+      headers: { ...authHeaders() },
+    }
+  );
+}
+
+// --- System Notifications ---
+export interface SystemNotification {
+  id: number;
+  type: string;
+  message: string;
+  ride_id: number | null;
+  created_at: string;
+  read_at: string | null;
+}
+
+export async function getSystemNotifications(): Promise<SystemNotification[]> {
+  return fetchJson<SystemNotification[]>(`${BASE}/notifications`, {
     headers: { ...authHeaders() },
   });
 }

@@ -92,7 +92,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
   const isLoggedIn = !!getToken();
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black/20 backdrop-blur-md backdrop-saturate-200 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-gray-900">

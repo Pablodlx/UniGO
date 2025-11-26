@@ -185,6 +185,9 @@ def create_ride(db: Session, ride_data: RideCreate, driver_id: int) -> RideOut:
         # Already timezone-aware - convert to UTC for storage
         departure_date = departure_date.astimezone(tz.utc)
     
+    # Ensure available_seats is correctly parsed as int
+    available_seats_value = int(ride_data.available_seats) if ride_data.available_seats is not None else 1
+    
     ride = Ride(
         driver_id=driver_id,
         departure_city=ride_data.departure_city,
@@ -196,7 +199,7 @@ def create_ride(db: Session, ride_data: RideCreate, driver_id: int) -> RideOut:
         estimated_duration_minutes=estimated_duration_minutes,
         departure_date=departure_date,
         departure_time=ride_data.departure_time,
-        available_seats=ride_data.available_seats,
+        available_seats=available_seats_value,
         price_per_seat=ride_data.price_per_seat,
         vehicle_brand=ride_data.vehicle_brand,
         vehicle_color=ride_data.vehicle_color,

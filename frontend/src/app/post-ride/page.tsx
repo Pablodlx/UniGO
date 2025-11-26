@@ -13,6 +13,9 @@ import SaveFavoriteModal from "@/components/SaveFavoriteModal";
 import FavoritesListModal from "@/components/FavoritesListModal";
 import ConfirmFavoriteModal from "@/components/ConfirmFavoriteModal";
 import { loadGoogleMaps } from "@/utils/googleMapsLoader";
+import { isProfileComplete } from "@/utils/isProfileComplete";
+import { useToast } from "@/hooks/useToast";
+import { getProfile } from "@/lib/api";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000/api";
 
@@ -110,6 +113,19 @@ export default function PostRidePage() {
   const [distanceKm, setDistanceKm] = useState<number | null>(null);
   const [durationMinutes, setDurationMinutes] = useState<number | null>(null);
   const [loadingDirections, setLoadingDirections] = useState(false);
+  const { showToast, ToastComponent } = useToast();
+  const [userProfile, setUserProfile] = useState<{
+    full_name?: string | null;
+    university?: string | null;
+    degree?: string | null;
+    course?: number | null;
+    home_address?: {
+      formatted_address: string;
+      place_id: string;
+      lat: number;
+      lng: number;
+    } | null;
+  } | null>(null);
 
   const {
     register,
@@ -132,8 +148,27 @@ export default function PostRidePage() {
 
   // Check login status on client side only to avoid hydration mismatch
   useEffect(() => {
-    setIsLoggedIn(!!getToken());
+    const token = getToken();
+    setIsLoggedIn(!!token);
+    if (token) {
+      fetchUserProfile();
+    }
   }, []);
+
+  const fetchUserProfile = async () => {
+    try {
+      const profile = await getProfile();
+      setUserProfile({
+        full_name: profile.full_name,
+        university: profile.university,
+        degree: profile.degree,
+        course: profile.course,
+        home_address: profile.home_address || undefined,
+      });
+    } catch (error) {
+      console.error("Error fetching user profile:", error);
+    }
+  };
 
   // Get directions when origin and destination are selected
   const getDirections = useCallback(async () => {
@@ -221,6 +256,12 @@ export default function PostRidePage() {
       return;
     }
     
+    // Validate profile BEFORE making the request
+    if (!isProfileComplete(userProfile)) {
+      showToast("Debes completar tu perfil para poder realizar esta acción.");
+      return;
+    }
+
     setLoading(true);
     
     // Prepare payload with address data
@@ -267,6 +308,24 @@ export default function PostRidePage() {
 
       if (!response.ok) {
         const errorText = await response.text();
+        let errorDetail = "";
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorDetail = errorJson.detail || "";
+        } catch {
+          errorDetail = errorText;
+        }
+        
+        // Check if it's a profile incomplete error (fallback - should not happen if validation works)
+        if (
+          response.status === 400 &&
+          (errorDetail === "Debes completar tu perfil antes de reservar un viaje." ||
+           errorDetail === "Debes completar tu perfil antes de publicar un viaje.")
+        ) {
+          showToast("Debes completar tu perfil para poder realizar esta acción.");
+          setLoading(false);
+          return;
+        }
         throw new Error(errorText || `Failed to post ride: ${response.status}`);
       }
 
@@ -284,6 +343,16 @@ export default function PostRidePage() {
       
     } catch (e: any) {
       console.error("Error posting ride:", e);
+      // Check if error message contains profile incomplete message (fallback)
+      const errorMessage = e?.message || "";
+      if (
+        errorMessage.includes("Debes completar tu perfil antes de reservar un viaje") ||
+        errorMessage.includes("Debes completar tu perfil antes de publicar un viaje")
+      ) {
+        showToast("Debes completar tu perfil para poder realizar esta acción.");
+        setLoading(false);
+        return;
+      }
       setMsg(e?.message ?? "Error al publicar el viaje");
       setLoading(false);
     }
@@ -901,6 +970,8 @@ export default function PostRidePage() {
           setSelectedFavorite(null);
         }}
       />
+
+      {ToastComponent}
     </DesktopLayout>
   );
 }

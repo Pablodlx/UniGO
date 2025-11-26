@@ -10,6 +10,7 @@ from app.rides import service
 from app.rides.schemas import RideCreate, RideOut, RideSearch, Passenger
 from app.rides import favorites_service
 from app.rides.favorites_schemas import FavoriteRideCreate, FavoriteRideOut
+from app.utils.profile_validation import is_profile_complete
 
 router = APIRouter(prefix="/rides", tags=["Rides"])
 
@@ -21,6 +22,13 @@ def create_ride(
     current_user: User = Depends(get_current_user),
 ):
     """Create a new ride"""
+    # Validate profile is complete before allowing ride creation
+    if not is_profile_complete(current_user):
+        raise HTTPException(
+            status_code=400,
+            detail="Debes completar tu perfil antes de publicar un viaje."
+        )
+    
     try:
         return service.create_ride(db, ride_data, current_user.id)
     except Exception as e:
@@ -140,6 +148,9 @@ def get_my_bookings(
                     # Get all confirmed passengers for this ride
                     passengers_info, passengers_ids = _get_ride_passengers(db, ride.id)
                     
+                    # Get booking status for this user's booking
+                    booking_status = booking.status.value if booking else None
+                    
                     result.append(RideOut(
                         id=ride.id,
                         driver_id=ride.driver_id,
@@ -166,6 +177,7 @@ def get_my_bookings(
                         reserved_by_user_id=reserved_by_user_id,
                         passengers=passengers_info,
                         passengers_ids=passengers_ids,
+                        booking_status=booking_status,  # Add booking status
                     ))
             except Exception as e:
                 print(f"Error processing booking {booking.id}: {e}")
@@ -503,7 +515,13 @@ def book_ride(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Book a ride (simplified version - just confirms booking)"""
+    """Book a ride - creates booking in pending status, waiting for driver confirmation"""
+    # Validate profile is complete before allowing booking
+    if not is_profile_complete(current_user):
+        raise HTTPException(
+            status_code=400,
+            detail="Debes completar tu perfil antes de reservar un viaje."
+        )
     # Check if ride exists
     ride = db.query(Ride).filter(Ride.id == ride_id, Ride.is_active == True).first()
     if not ride:
@@ -513,28 +531,33 @@ def book_ride(
     if ride.driver_id == current_user.id:
         raise HTTPException(status_code=400, detail="You cannot book your own ride")
     
-    # Check if there are enough seats
+    # Check if user already has a pending or confirmed booking for this ride
+    existing_booking = db.query(Booking).filter(
+        Booking.ride_id == ride_id,
+        Booking.passenger_id == current_user.id,
+        Booking.status.in_([BookingStatus.pending, BookingStatus.confirmed])
+    ).first()
+    if existing_booking:
+        raise HTTPException(status_code=400, detail="You already have a booking for this ride")
+    
+    # Check if there are enough seats (we check this but don't deduct yet)
     if ride.available_seats < seats:
         raise HTTPException(status_code=400, detail="Not enough available seats")
     
     try:
-        # Create booking record
+        # Create booking record in pending status
         booking = Booking(
             ride_id=ride_id,
             passenger_id=current_user.id,
-            status=BookingStatus.confirmed,
+            status=BookingStatus.pending,
             seats=seats,
         )
         db.add(booking)
-        
-        # Decrease available seats
-        ride.available_seats -= seats
         db.commit()
-        db.refresh(ride)
         db.refresh(booking)
         
-        # For now, just return success message
-        return {"message": "Booking confirmed successfully", "ride_id": ride_id, "seats": seats, "available_seats": ride.available_seats}
+        # Return success with pending status
+        return {"success": True, "status": "pending", "booking_id": booking.id}
     except Exception as e:
         db.rollback()
         print(f"Error creating booking: {e}")

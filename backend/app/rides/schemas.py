@@ -62,6 +62,7 @@ class RideOut(RideBase):
     reserved_by_user_id: Optional[int] = None  # ID of the first passenger with confirmed booking
     passengers: List[PassengerInfo] = []  # List of all confirmed passengers
     passengers_ids: List[int] = []  # List of all confirmed passenger IDs
+    booking_status: Optional[str] = None  # Status of the booking: "pending", "confirmed", "rejected"
 
     class Config:
         from_attributes = True

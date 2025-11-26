@@ -8,6 +8,7 @@ import RatingModal from "@/components/RatingModal";
 import PassengerSelectionModal, { Passenger } from "@/components/PassengerSelectionModal";
 import ActivityMapPreview from "@/components/ActivityMapPreview";
 import TripGroupChat from "@/components/TripGroupChat";
+import PassengersSection from "@/components/PassengersSection";
 import { getToken, Ride, getMyRides, getMyBookings, cancelRide, cancelBooking, getRideHistory, RideHistoryItem, createRating, getCurrentUserId } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -606,6 +607,23 @@ export default function MyRidesPage() {
                             </button>
                           </div>
                         )}
+
+                        {/* Passengers Section - Only for driver */}
+                        {ride.is_active && currentUserId === ride.driver_id && (
+                          <PassengersSection
+                            rideId={ride.id}
+                            onSeatFreed={(newAvailableSeats) => {
+                              // Actualizar available_seats en el estado local
+                              setDriverRides((prevRides) =>
+                                prevRides.map((r) =>
+                                  r.id === ride.id
+                                    ? { ...r, available_seats: newAvailableSeats }
+                                    : r
+                                )
+                              );
+                            }}
+                          />
+                        )}
                       </div>
                     </div>
                   ))}
@@ -648,9 +666,26 @@ export default function MyRidesPage() {
                         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                           <div>
                             <div className="flex items-center gap-3 mb-3">
-                              <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
-                                Reservado
-                              </span>
+                              {ride.booking_status === 'pending' && (
+                                <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
+                                  Pendiente de confirmación
+                                </span>
+                              )}
+                              {ride.booking_status === 'confirmed' && (
+                                <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+                                  Confirmado
+                                </span>
+                              )}
+                              {ride.booking_status === 'rejected' && (
+                                <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+                                  Rechazado
+                                </span>
+                              )}
+                              {!ride.booking_status && (
+                                <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
+                                  Reservado
+                                </span>
+                              )}
                             </div>
                             <div className="text-sm text-gray-500 uppercase tracking-[0.3em]">
                               {formatDate(ride.departure_date)} · {ride.departure_time}
@@ -866,15 +901,16 @@ export default function MyRidesPage() {
       />
 
       {/* Group Chat Modal */}
-      {chatModal.isOpen && chatModal.tripId && currentUserId && (
-        <TripGroupChat
-          isOpen={chatModal.isOpen}
-          onClose={() => setChatModal({ isOpen: false, tripId: null })}
-          tripId={chatModal.tripId}
-          currentUserId={currentUserId}
-        />
-      )}
-    </DesktopLayout>
-  );
-}
+              {chatModal.isOpen && chatModal.tripId && currentUserId && (
+                <TripGroupChat
+                  isOpen={chatModal.isOpen}
+                  onClose={() => setChatModal({ isOpen: false, tripId: null })}
+                  tripId={chatModal.tripId}
+                  currentUserId={currentUserId}
+                />
+              )}
+
+            </DesktopLayout>
+          );
+        }
 

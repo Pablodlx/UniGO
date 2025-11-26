@@ -9,9 +9,10 @@ from app.rides import router as rides_router
 from app.ratings import router as ratings_router
 from app.chat.router import router as chat_router
 from app.trip_chat.router import router as trip_chat_router
+from app.notifications.router import router as notifications_router
 
 # Import all models to ensure they're registered
-from app.auth.models import User, Ride, Booking, EmailCode, Rating, FavoriteRide, Message, TripGroupMessage
+from app.auth.models import User, Ride, Booking, EmailCode, Rating, FavoriteRide, Message, TripGroupMessage, Notification
 from app.db.session import Base, engine
 
 # Create all tables if they don't exist (development only)
@@ -80,6 +81,11 @@ app.include_router(rides_router, prefix="/api")
 app.include_router(ratings_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(trip_chat_router, prefix="/api")
+from app.rides.passengers_router import router as passengers_router
+app.include_router(passengers_router, prefix="/api")
+from app.bookings.router import router as bookings_router
+app.include_router(bookings_router, prefix="/api")
+app.include_router(notifications_router, prefix="/api")
 
 # Mount static files for avatars
 AVATAR_DIR = os.getenv("AVATAR_DIR", "data/avatars")

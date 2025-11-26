@@ -4,6 +4,8 @@ import "./globals.css";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import NotificationPanel from "@/components/NotificationPanel";
 import NotificationHookWrapper from "@/components/NotificationHookWrapper";
+import PendingBookingsWrapper from "@/components/PendingBookingsWrapper";
+import SystemNotificationBanner from "@/components/SystemNotificationBanner";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,6 +16,7 @@ const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
 });
+
 
 export const metadata: Metadata = {
   title: "UniGO - Carsharing Universitario",
@@ -34,6 +37,8 @@ export default function RootLayout({
           {children}
           <NotificationHookWrapper />
           <NotificationPanel />
+          <PendingBookingsWrapper />
+          <SystemNotificationBanner />
         </NotificationProvider>
       </body>
     </html>

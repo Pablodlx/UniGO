@@ -95,7 +95,7 @@ export default function RideDetail({ ride, onBack, onContact, bookingSuccess = f
             </div>
             <h1 className="text-3xl font-bold text-gray-800 mb-4">¡Viaje reservado correctamente!</h1>
             <p className="text-gray-600 text-lg mb-8">
-              Tu reserva ha sido confirmada. El conductor se pondrá en contacto contigo pronto.
+              Espera a que el conductor acepte tu solicitud.
             </p>
             <button
               onClick={onReturnHome}
