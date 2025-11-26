@@ -26,8 +26,8 @@ export function useSystemNotifications() {
       const data = await getSystemNotifications();
       setNotifications(data);
 
-      // Get unread notifications of type "booking_update" (read_at is null)
-      const unread = data.filter(n => n.read_at === null && n.type === "booking_update");
+      // Get unread notifications of type "booking_update", "booking_cancelled", or "new_rating" (read_at is null)
+      const unread = data.filter(n => n.read_at === null && (n.type === "booking_update" || n.type === "booking_cancelled" || n.type === "new_rating"));
       
       if (unread.length > 0) {
         // Get the latest unread notification

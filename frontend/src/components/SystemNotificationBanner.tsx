@@ -5,11 +5,141 @@ import { useSystemNotifications } from "@/hooks/useSystemNotifications";
 export default function SystemNotificationBanner() {
   const { notification, visible, dismiss } = useSystemNotifications();
 
-  if (!visible || !notification || notification.type !== "booking_update") {
+  if (!visible || !notification || (notification.type !== "booking_update" && notification.type !== "booking_cancelled" && notification.type !== "new_rating")) {
     return null;
   }
 
-  // Determinar si es aceptada o rechazada basándose en el mensaje
+  // Handle new_rating notifications
+  if (notification.type === "new_rating") {
+    return (
+      <div
+        style={{
+          position: "fixed",
+          bottom: "20px",
+          left: "20px",
+          zIndex: 9998,
+          background: "white",
+          border: "1px solid #ddd",
+          padding: "15px",
+          borderRadius: "10px",
+          width: "360px",
+          boxShadow: "0 4px 15px rgba(0,0,0,0.15)",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            {/* Icono de estrella amarillo */}
+            <div
+              style={{
+                width: "24px",
+                height: "24px",
+                borderRadius: "50%",
+                backgroundColor: "#fbbf24",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "white",
+                fontSize: "14px",
+                fontWeight: "bold",
+              }}
+            >
+              ⭐
+            </div>
+            <strong style={{ color: "#166534" }}>
+              Nueva valoración recibida
+            </strong>
+          </div>
+          <button
+            onClick={dismiss}
+            style={{
+              background: "transparent",
+              border: "none",
+              fontSize: "20px",
+              cursor: "pointer",
+              padding: "0 5px",
+              lineHeight: "1",
+            }}
+            aria-label="Cerrar"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div style={{ marginTop: "10px" }}>
+          <p style={{ fontSize: "14px", color: "#666" }}>
+            {notification.message}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Handle booking_cancelled notifications
+  if (notification.type === "booking_cancelled") {
+    return (
+      <div
+        style={{
+          position: "fixed",
+          bottom: "20px",
+          left: "20px",
+          zIndex: 9998,
+          background: "white",
+          border: "1px solid #ddd",
+          padding: "15px",
+          borderRadius: "10px",
+          width: "360px",
+          boxShadow: "0 4px 15px rgba(0,0,0,0.15)",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            {/* Icono de alerta amarillo */}
+            <div
+              style={{
+                width: "24px",
+                height: "24px",
+                borderRadius: "50%",
+                backgroundColor: "#fbbf24",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "white",
+                fontSize: "14px",
+                fontWeight: "bold",
+              }}
+            >
+              ⚠️
+            </div>
+            <strong style={{ color: "#166534" }}>
+              Reserva cancelada
+            </strong>
+          </div>
+          <button
+            onClick={dismiss}
+            style={{
+              background: "transparent",
+              border: "none",
+              fontSize: "20px",
+              cursor: "pointer",
+              padding: "0 5px",
+              lineHeight: "1",
+            }}
+            aria-label="Cerrar"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div style={{ marginTop: "10px" }}>
+          <p style={{ fontSize: "14px", color: "#666" }}>
+            {notification.message}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Determinar si es aceptada o rechazada basándose en el mensaje (para booking_update)
   const messageLower = notification.message.toLowerCase();
   const isAccepted = messageLower.includes("aceptada");
   const isRejected = messageLower.includes("rechazada");

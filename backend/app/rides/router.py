@@ -3,7 +3,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from sqlalchemy.orm import Session
 
-from app.auth.models import Ride, User, Booking, BookingStatus
+from app.auth.models import Ride, User, Booking, BookingStatus, Notification
 from app.auth.router import get_current_user
 from app.db.session import get_db
 from app.rides import service
@@ -609,13 +609,33 @@ def cancel_booking(
         raise HTTPException(status_code=404, detail="Ride not found")
     
     try:
+        # Check if booking was confirmed (to notify driver)
+        was_confirmed = booking.status == BookingStatus.confirmed
+        
         # Cancel the booking
         booking.status = BookingStatus.canceled
         
-        # Restore available seats
-        ride.available_seats += booking.seats
+        # Restore available seats (only if it was confirmed)
+        if was_confirmed:
+            ride.available_seats += booking.seats
+            
+            # Create notification for the driver
+            notification = Notification(
+                receiver_id=ride.driver_id,
+                type="booking_cancelled",
+                ride_id=ride.id,
+                message=(
+                    f"El pasajero {current_user.full_name or current_user.email} "
+                    f"ha cancelado su reserva para el viaje "
+                    f"{ride.departure_city} → {ride.destination_city}."
+                ),
+            )
+            db.add(notification)
         
         db.commit()
+        db.refresh(ride)
+        if was_confirmed:
+            db.refresh(notification)
         
         return {"message": "Booking canceled successfully", "ride_id": ride_id, "available_seats": ride.available_seats}
     except Exception as e:

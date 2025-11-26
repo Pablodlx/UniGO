@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import DesktopLayout from "@/components/DesktopLayout";
 import PassengerSelectionModal, { Passenger } from "@/components/PassengerSelectionModal";
 import RatingModal from "@/components/RatingModal";
-import { getToken, getRideHistory, RideHistoryItem, createRating, CreateRatingRequest } from "@/lib/api";
+import { getToken, getRideHistory, RideHistoryItem, createRatingByRide, hasRated, getCurrentUserId } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -20,17 +20,22 @@ export default function RegistroPage() {
   }, []);
   const [ratingModal, setRatingModal] = useState<{
     isOpen: boolean;
-    bookingId: number | null;
+    rideId: number | null;
+    ratedId: number | null;
     ratedUserName: string;
     ratedUserAvatar?: string | null;
     ratedUserRole: "conductor" | "pasajero";
   }>({
     isOpen: false,
-    bookingId: null,
+    rideId: null,
+    ratedId: null,
     ratedUserName: "",
     ratedUserAvatar: null,
     ratedUserRole: "conductor",
   });
+  const [hasRatedMap, setHasRatedMap] = useState<Record<string, boolean>>({});
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [ratingButtonsState, setRatingButtonsState] = useState<Record<number, { show: boolean; otherUserId: number | null }>>({});
   const [passengerSelectionModal, setPassengerSelectionModal] = useState<{
     isOpen: boolean;
     rideId: number | null;
@@ -82,6 +87,69 @@ export default function RegistroPage() {
       const rideHistory = await getRideHistory();
       console.log("Ride history data:", rideHistory); // Debug log
       setHistory(rideHistory);
+      
+      // Check which rides should show rating button
+      const currentUserId = getCurrentUserId();
+      if (!currentUserId) {
+        setLoading(false);
+        return;
+      }
+      
+      const buttonsState: Record<number, { show: boolean; otherUserId: number | null }> = {};
+      const ratedChecks: Record<string, boolean> = {};
+      
+      // Process checks in parallel for better performance
+      const checkPromises = rideHistory
+        .filter(ride => ride.status === "completed")
+        .map(async (ride) => {
+          // Determine other user ID
+          let otherUserId: number | null = null;
+          const isDriver = ride.driver_id === currentUserId;
+          
+          if (isDriver) {
+            // Driver rating passenger
+            if (ride.passengers && ride.passengers.length > 0) {
+              otherUserId = ride.passengers[0].passenger_id;
+            } else if (ride.rated_user_id) {
+              otherUserId = ride.rated_user_id;
+            }
+          } else {
+            // Passenger rating driver
+            otherUserId = ride.driver_id;
+          }
+          
+          if (!otherUserId) {
+            buttonsState[ride.id] = { show: false, otherUserId: null };
+            return;
+          }
+          
+          // Check if already rated
+          try {
+            const hasRatedResult = await hasRated(ride.id, currentUserId, otherUserId);
+            const key = `${ride.id}-${currentUserId}-${otherUserId}`;
+            ratedChecks[key] = hasRatedResult;
+            
+            // Show button if not rated
+            buttonsState[ride.id] = {
+              show: !hasRatedResult,
+              otherUserId: otherUserId
+            };
+            
+            console.log(`Ride ${ride.id}: isDriver=${isDriver}, otherUserId=${otherUserId}, hasRated=${hasRatedResult}`);
+          } catch (error) {
+            console.error(`Error checking rating for ride ${ride.id}:`, error);
+            // On error, show button (default to allowing rating)
+            buttonsState[ride.id] = {
+              show: true,
+              otherUserId: otherUserId
+            };
+          }
+        });
+      
+      await Promise.all(checkPromises);
+      setHasRatedMap(ratedChecks);
+      setRatingButtonsState(buttonsState);
+      console.log("Rating buttons state:", buttonsState);
     } catch (error) {
       console.error("Error fetching ride history:", error);
     } finally {
@@ -90,38 +158,62 @@ export default function RegistroPage() {
   };
 
   const handleRateClick = (ride: RideHistoryItem) => {
-    // For driver rides with multiple passengers, show passenger selection modal
-    if (ride.role === "conductor" && ride.passengers && ride.passengers.length > 0) {
-      setPassengerSelectionModal({
-        isOpen: true,
-        rideId: ride.id,
-        passengers: ride.passengers,
-      });
+    const currentUserId = getCurrentUserId();
+    if (!currentUserId) {
+      console.error("No current user ID");
       return;
     }
     
-    // For passenger rides or legacy driver rides (single passenger), use direct rating
-    if (!ride.can_rate || !ride.booking_id) return;
+    // Get other user ID from button state
+    const buttonState = ratingButtonsState[ride.id];
+    if (!buttonState || !buttonState.otherUserId) {
+      console.error("No otherUserId found in button state");
+      return;
+    }
     
-    // Use the rated user information from the ride (the person being rated)
-    const ratedUserName = ride.rated_user_name || ride.driver_name || "Usuario";
-    const ratedUserAvatar = ride.rated_user_avatar || null;
-    const ratedUserRole = ride.role === "conductor" ? "pasajero" : "conductor";
+    const otherUserId = buttonState.otherUserId;
+    const isDriver = ride.driver_id === currentUserId;
+    
+    let ratedUserName = "";
+    let ratedUserAvatar: string | null = null;
+    
+    if (isDriver) {
+      // Driver rating passenger
+      if (ride.passengers && ride.passengers.length > 0) {
+        const passenger = ride.passengers.find(p => p.passenger_id === otherUserId) || ride.passengers[0];
+        ratedUserName = passenger.passenger_name;
+        ratedUserAvatar = passenger.passenger_avatar || null;
+      } else if (ride.rated_user_name) {
+        ratedUserName = ride.rated_user_name;
+        ratedUserAvatar = ride.rated_user_avatar || null;
+      } else {
+        ratedUserName = "Pasajero";
+      }
+    } else {
+      // Passenger rating driver
+      ratedUserName = ride.driver_name || "Conductor";
+      ratedUserAvatar = null;
+    }
     
     setRatingModal({
       isOpen: true,
-      bookingId: ride.booking_id,
+      rideId: ride.id,
+      ratedId: otherUserId,
       ratedUserName: ratedUserName,
       ratedUserAvatar: ratedUserAvatar,
-      ratedUserRole: ratedUserRole,
+      ratedUserRole: isDriver ? "pasajero" : "conductor",
     });
   };
 
   const handlePassengerSelect = (passenger: Passenger) => {
-    // Open rating modal for selected passenger
+    // Find the ride for this passenger
+    const ride = history.find(r => r.id === passenger.ride_id || (r.passengers && r.passengers.some(p => p.passenger_id === passenger.passenger_id)));
+    if (!ride) return;
+    
     setRatingModal({
       isOpen: true,
-      bookingId: passenger.booking_id,
+      rideId: ride.id,
+      ratedId: passenger.passenger_id,
       ratedUserName: passenger.passenger_name,
       ratedUserAvatar: passenger.passenger_avatar || null,
       ratedUserRole: "pasajero",
@@ -144,25 +236,42 @@ export default function RegistroPage() {
   const closeRatingModal = () => {
     setRatingModal({
       isOpen: false,
-      bookingId: null,
+      rideId: null,
+      ratedId: null,
       ratedUserName: "",
       ratedUserAvatar: null,
       ratedUserRole: "conductor",
     });
   };
 
-  const handleRatingSubmit = async (rating: number, comment?: string) => {
-    if (!ratingModal.bookingId) {
-      throw new Error("No se pudo identificar la reserva");
+  const handleRatingSubmit = async (score: number, comment?: string) => {
+    const currentUserId = getCurrentUserId();
+    if (!ratingModal.rideId || !ratingModal.ratedId || !currentUserId) {
+      throw new Error("No se pudo identificar el viaje o el usuario");
     }
 
-    await createRating({
-      booking_id: ratingModal.bookingId,
-      rating: rating,
+    await createRatingByRide({
+      ride_id: ratingModal.rideId,
+      rated_id: ratingModal.ratedId,
+      score: score,
       comment: comment,
     });
 
-    // Refresh ride history to update has_rated and can_rate
+    // Update hasRatedMap and button state
+    const key = `${ratingModal.rideId}-${currentUserId}-${ratingModal.ratedId}`;
+    setHasRatedMap(prev => ({ ...prev, [key]: true }));
+    
+    // Hide button for this ride
+    setRatingButtonsState(prev => ({
+      ...prev,
+      [ratingModal.rideId]: { show: false, otherUserId: ratingModal.ratedId }
+    }));
+    
+    // Show success message
+    setSuccessMessage("¡Valoración enviada correctamente!");
+    setTimeout(() => setSuccessMessage(null), 3000);
+
+    // Refresh ride history
     await fetchHistory();
     closeRatingModal();
   };
@@ -292,7 +401,8 @@ export default function RegistroPage() {
               </div>
             ) : (
               <div className="space-y-6">
-                {history.map((ride) => (
+                {history.map((ride) => {
+                  return (
                   <div
                     key={ride.id}
                     className="bg-white border-2 border-gray-200 rounded-2xl p-6 hover:shadow-lg hover:border-orange-300 transition-all duration-200"
@@ -311,22 +421,6 @@ export default function RegistroPage() {
                           </span>
                         )}
                       </div>
-                      
-                      {/* Rating Button - Show only when there are pending passengers to rate */}
-                      {((ride.role === "conductor" && ride.has_pending_ratings) || (ride.role === "pasajero" && ride.can_rate && ride.booking_id)) && (
-                        <div className="flex-shrink-0">
-                          <button
-                            onClick={() => handleRateClick(ride)}
-                            className="px-4 py-2 bg-orange-500 text-white rounded-lg font-medium hover:bg-orange-600 transition-colors text-sm flex items-center space-x-2"
-                            type="button"
-                          >
-                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                            </svg>
-                            <span>Valorar Viaje</span>
-                          </button>
-                        </div>
-                      )}
                     </div>
                     
                     {/* Route Information */}
@@ -390,13 +484,32 @@ export default function RegistroPage() {
                         {ride.additional_details}
                       </div>
                     )}
+                    
+                    {/* Precio Total */}
+                    <div className="mt-4 pt-4 border-t border-gray-200">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm font-medium text-gray-700">Precio total:</span>
+                        <span className="text-xl font-bold text-gray-900">{ride.price_per_seat.toFixed(2)} €</span>
+                      </div>
+                    </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
         </div>
       </div>
+
+      {/* Success Message */}
+      {successMessage && (
+        <div className="fixed bottom-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 flex items-center space-x-2">
+          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+          </svg>
+          <span>{successMessage}</span>
+        </div>
+      )}
 
       {/* Rating Modal */}
       <RatingModal

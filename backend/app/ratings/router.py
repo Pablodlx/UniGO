@@ -7,7 +7,7 @@ from app.auth.models import User
 from app.auth.router import get_current_user
 from app.db.session import get_db
 from app.ratings import service
-from app.ratings.schemas import RatingCreate, RatingOut, RatingWithNames
+from app.ratings.schemas import RatingCreate, RatingOut, RatingWithNames, UserRatingsResponse, UserRatingItem, RatingCreateByRide
 
 router = APIRouter(prefix="/ratings", tags=["Ratings"])
 
@@ -28,33 +28,69 @@ def create_rating(
     )
 
 
-@router.get("/user/{user_id}", response_model=List[RatingWithNames])
+@router.post("/create", status_code=status.HTTP_201_CREATED)
+def create_rating_by_ride_endpoint(
+    rating_data: RatingCreateByRide,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Create a rating using ride_id, rated_id, score, and comment"""
+    service.create_rating_by_ride(
+        db=db,
+        ride_id=rating_data.ride_id,
+        rater_id=current_user.id,
+        rated_id=rating_data.rated_id,
+        score=rating_data.score,
+        comment=rating_data.comment
+    )
+    return {"status": "ok", "message": "Rating submitted"}
+
+
+@router.get("/has-rated")
+def check_has_rated(
+    ride_id: int,
+    rater_id: int,
+    rated_id: int,
+    db: Session = Depends(get_db),
+):
+    """Check if a user has already rated another user for a specific ride"""
+    has_rated_result = service.has_rated(db, ride_id, rater_id, rated_id)
+    return {"hasRated": has_rated_result}
+
+
+@router.get("/user/{user_id}", response_model=UserRatingsResponse)
 def get_user_ratings(
     user_id: int,
     db: Session = Depends(get_db),
 ):
-    """Get all ratings received by a specific user"""
+    """Get all ratings received by a specific user with average and count"""
+    from app.auth.models import Booking
+    
     ratings = service.get_user_ratings(db, user_id)
     
-    # Enrich with user names
-    result = []
+    # Calculate average and count
+    average = service.get_user_average_rating(db, user_id) or 0.0
+    count = len(ratings)
+    
+    # Build ratings list with ride_id
+    ratings_list = []
     for rating in ratings:
-        rater = db.query(User).filter(User.id == rating.rater_id).first()
-        rated = db.query(User).filter(User.id == rating.rated_id).first()
+        # Get ride_id from booking
+        booking = db.query(Booking).filter(Booking.id == rating.booking_id).first()
+        ride_id = booking.ride_id if booking else 0
         
-        result.append(RatingWithNames(
-            id=rating.id,
-            booking_id=rating.booking_id,
-            rater_id=rating.rater_id,
-            rated_id=rating.rated_id,
-            rating=rating.rating,
+        ratings_list.append(UserRatingItem(
+            score=rating.rating,
             comment=rating.comment,
-            created_at=rating.created_at,
-            rater_name=rater.full_name or rater.email if rater else "Unknown",
-            rated_name=rated.full_name or rated.email if rated else "Unknown"
+            ride_id=ride_id,
+            created_at=rating.created_at
         ))
     
-    return result
+    return UserRatingsResponse(
+        average=average,
+        count=count,
+        ratings=ratings_list
+    )
 
 
 @router.get("/booking/{booking_id}/check")
@@ -73,4 +109,3 @@ def check_booking_rating(
         }
     
     return {"has_rated": False, "rating": None}
-

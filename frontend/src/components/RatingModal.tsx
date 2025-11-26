@@ -23,7 +23,7 @@ interface RatingModalProps {
   ratedUserAvatar?: string | null;
   ratedUserRole: "conductor" | "pasajero";
   onClose: () => void;
-  onSubmit: (rating: number, comment?: string) => Promise<void>;
+  onSubmit: (score: number, comment?: string) => Promise<void>;
 }
 
 export default function RatingModal({
@@ -219,4 +219,3 @@ export default function RatingModal({
     </div>
   );
 }
-

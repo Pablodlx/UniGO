@@ -420,6 +420,64 @@ export async function createRating(data: CreateRatingRequest): Promise<RatingRes
   });
 }
 
+// --- New Rating System (by ride_id) ---
+export interface CreateRatingByRideRequest {
+  ride_id: number;
+  rated_id: number;
+  score: number; // 1-5
+  comment?: string;
+}
+
+export interface HasRatedResponse {
+  hasRated: boolean;
+}
+
+export async function hasRated(rideId: number, raterId: number, ratedId: number): Promise<boolean> {
+  try {
+    const response = await fetchJson<HasRatedResponse>(
+      `${BASE}/ratings/has-rated?ride_id=${rideId}&rater_id=${raterId}&rated_id=${ratedId}`,
+      {
+        headers: { ...authHeaders() },
+      }
+    );
+    return response.hasRated;
+  } catch (error) {
+    console.error("Error checking if rated:", error);
+    return false;
+  }
+}
+
+export async function createRatingByRide(data: CreateRatingByRideRequest): Promise<{ status: string; message: string }> {
+  return fetchJson<{ status: string; message: string }>(`${BASE}/ratings/create`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+    },
+    body: JSON.stringify(data),
+  });
+}
+
+// --- User Ratings ---
+export interface UserRatingItem {
+  score: number;
+  comment: string | null;
+  ride_id: number;
+  created_at: string;
+}
+
+export interface UserRatingsResponse {
+  average: number;
+  count: number;
+  ratings: UserRatingItem[];
+}
+
+export async function getUserRatings(userId: number): Promise<UserRatingsResponse> {
+  return fetchJson<UserRatingsResponse>(`${BASE}/ratings/user/${userId}`, {
+    headers: { ...authHeaders() },
+  });
+}
+
 // --- Favorite Rides ---
 export interface FavoriteRide {
   id: number;
