@@ -504,6 +504,38 @@ export async function getMessages(trip_id: number): Promise<ChatMessage[]> {
   });
 }
 
+// --- Unread Messages Summary ---
+export interface ChatUnreadInfo {
+  chat_id: number;
+  trip_id: number;
+  trip_title: string;
+  other_user_name: string;
+  other_user_id: number;
+  unread_count: number;
+  last_message_id: number;
+  last_message_at?: string;
+  is_group_chat?: boolean;
+}
+
+export interface UnreadSummaryResponse {
+  total_unread: number;
+  max_message_id: number;
+  chats: ChatUnreadInfo[];
+}
+
+export async function getUnreadSummary(): Promise<UnreadSummaryResponse> {
+  return fetchJson<UnreadSummaryResponse>(`${BASE}/chat/unread-summary`, {
+    headers: { ...authHeaders() },
+  });
+}
+
+export async function markChatAsRead(chat_id: number): Promise<void> {
+  return fetchJson<void>(`${BASE}/chat/${chat_id}/mark-read`, {
+    method: "POST",
+    headers: { ...authHeaders() },
+  });
+}
+
 export async function getRidePassengers(ride_id: number): Promise<Passenger[]> {
   return fetchJson<Passenger[]>(`${BASE}/rides/${ride_id}/passengers`, {
     headers: { ...authHeaders() },
@@ -538,6 +570,29 @@ export async function sendTripMessage(data: SendTripMessageRequest): Promise<Tri
 
 export async function getTripMessages(trip_id: number): Promise<TripGroupMessage[]> {
   return fetchJson<TripGroupMessage[]>(`${BASE}/trip-chat/messages?trip_id=${trip_id}`, {
+    headers: { ...authHeaders() },
+  });
+}
+
+// --- Unread Notifications ---
+export interface UnreadNotificationMessage {
+  id: number;
+  sender_id: number;
+  sender_name: string;
+  message: string;
+  timestamp: number;
+  trip_id: number;
+  trip_title: string;
+}
+
+export interface UnreadNotificationsResponse {
+  unread: boolean;
+  latest_message_timestamp: number;
+  messages: UnreadNotificationMessage[];
+}
+
+export async function getUnreadNotifications(): Promise<UnreadNotificationsResponse> {
+  return fetchJson<UnreadNotificationsResponse>(`${BASE}/trip-chat/unread`, {
     headers: { ...authHeaders() },
   });
 }

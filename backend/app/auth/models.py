@@ -191,6 +191,9 @@ class Message(Base):
     timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False, index=True
     )
+    read_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     
     # Relationships
     trip: Mapped["Ride"] = relationship("Ride", foreign_keys=[trip_id])

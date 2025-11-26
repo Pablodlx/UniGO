@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import DesktopLayout from "@/components/DesktopLayout";
 import ConfirmModal from "@/components/ConfirmModal";
 import RatingModal from "@/components/RatingModal";
@@ -13,6 +14,7 @@ import Link from "next/link";
 
 export default function MyRidesPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [driverRides, setDriverRides] = useState<Ride[]>([]);
   const [bookings, setBookings] = useState<Ride[]>([]);
@@ -75,6 +77,17 @@ export default function MyRidesPage() {
       setLoading(false);
     }
 
+    // Check if we need to open a chat from notification
+    const openChatParam = searchParams.get("openChat");
+    if (openChatParam && currentUserId) {
+      const tripId = parseInt(openChatParam, 10);
+      if (!isNaN(tripId)) {
+        setChatModal({ isOpen: true, tripId });
+        // Remove the query parameter from URL
+        router.replace("/my-rides", { scroll: false });
+      }
+    }
+
     // Set up auto-refresh every 60 seconds to update ride lists
     const refreshInterval = setInterval(() => {
       const currentToken = getToken();
@@ -103,6 +116,19 @@ export default function MyRidesPage() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
+
+  // Handle opening chat from notification
+  useEffect(() => {
+    const openChatParam = searchParams.get("openChat");
+    if (openChatParam && currentUserId) {
+      const tripId = parseInt(openChatParam, 10);
+      if (!isNaN(tripId)) {
+        setChatModal({ isOpen: true, tripId });
+        // Remove the query parameter from URL
+        router.replace("/my-rides", { scroll: false });
+      }
+    }
+  }, [searchParams, currentUserId, router]);
 
   const fetchMyRides = async () => {
     try {
