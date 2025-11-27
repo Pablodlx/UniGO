@@ -1,6 +1,7 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 import os
 
 from app.auth.router import router as auth_router
@@ -53,9 +54,75 @@ app.add_middleware(
 )
 
 
+# Setup avatar directory first (before routes and endpoints)
+AVATAR_DIR = os.getenv("AVATAR_DIR", "data/avatars")
+# Convert to absolute path if relative
+if not os.path.isabs(AVATAR_DIR):
+    # Get backend directory (parent of app/)
+    # __file__ is app/main.py, so dirname(dirname(__file__)) = backend/
+    current_file = os.path.abspath(__file__)  # /path/to/backend/app/main.py
+    backend_dir = os.path.dirname(os.path.dirname(current_file))  # /path/to/backend
+    AVATAR_DIR = os.path.join(backend_dir, AVATAR_DIR)  # /path/to/backend/data/avatars
+
+# Create directory if it doesn't exist
+os.makedirs(AVATAR_DIR, exist_ok=True)
+print(f"✅ Avatar directory configured: {AVATAR_DIR}")
+print(f"✅ Avatar directory exists: {os.path.exists(AVATAR_DIR)}")
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/static/avatars/{filename}")
+async def serve_avatar(filename: str):
+    """Serve avatar files directly"""
+    try:
+        print(f"📸 Serving avatar: {filename}")
+        print(f"📁 AVATAR_DIR: {AVATAR_DIR}")
+        
+        # Get absolute paths
+        real_avatar_dir = os.path.abspath(AVATAR_DIR)
+        file_path = os.path.join(real_avatar_dir, filename)
+        real_file_path = os.path.abspath(file_path)
+        
+        print(f"📂 File path: {file_path}")
+        print(f"📂 Real file path: {real_file_path}")
+        print(f"📂 Real avatar dir: {real_avatar_dir}")
+        
+        # Security: prevent directory traversal
+        if not real_file_path.startswith(real_avatar_dir):
+            print(f"❌ Security check failed: {real_file_path} not in {real_avatar_dir}")
+            raise HTTPException(status_code=403, detail="Forbidden")
+        
+        # Check if file exists
+        if not os.path.exists(file_path):
+            print(f"❌ File does not exist: {file_path}")
+            raise HTTPException(status_code=404, detail=f"Avatar not found: {filename}")
+        
+        if not os.path.isfile(file_path):
+            print(f"❌ Not a file: {file_path}")
+            raise HTTPException(status_code=404, detail=f"Not a file: {filename}")
+        
+        # Determine media type
+        if filename.lower().endswith(".png"):
+            media_type = "image/png"
+        elif filename.lower().endswith((".jpg", ".jpeg")):
+            media_type = "image/jpeg"
+        else:
+            media_type = "image/png"  # default
+        
+        print(f"✅ Serving file: {file_path} as {media_type}")
+        return FileResponse(file_path, media_type=media_type)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"❌ Error serving avatar {filename}: {e}")
+        print(f"❌ Traceback: {error_trace}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @app.get("/debug/config")
@@ -74,7 +141,6 @@ def debug_config():
         "api_key_length": len(settings.google_maps_api_key) if settings.google_maps_api_key else 0,
     }
 
-
 app.include_router(auth_router)
 app.include_router(profile_router.router, prefix="/api")
 app.include_router(rides_router, prefix="/api")
@@ -86,8 +152,3 @@ app.include_router(passengers_router, prefix="/api")
 from app.bookings.router import router as bookings_router
 app.include_router(bookings_router, prefix="/api")
 app.include_router(notifications_router, prefix="/api")
-
-# Mount static files for avatars
-AVATAR_DIR = os.getenv("AVATAR_DIR", "data/avatars")
-if os.path.exists(AVATAR_DIR):
-    app.mount("/static/avatars", StaticFiles(directory=AVATAR_DIR), name="avatars")

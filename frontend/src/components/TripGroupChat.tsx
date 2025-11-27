@@ -3,6 +3,21 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { TripGroupMessage, sendTripMessage, getTripMessages } from "@/lib/api";
 
+// Helper to construct full avatar URL
+const getAvatarUrl = (avatarUrl: string | null | undefined): string => {
+  if (!avatarUrl) return "/default-avatar.png";
+  
+  // If it's already a full URL, return it as is
+  if (avatarUrl.startsWith('http://') || avatarUrl.startsWith('https://')) {
+    return avatarUrl;
+  }
+  
+  // Otherwise, construct the full URL
+  const BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000/api";
+  const baseUrl = BASE.replace('/api', '');
+  return `${baseUrl}${avatarUrl}`;
+};
+
 interface TripGroupChatProps {
   isOpen: boolean;
   onClose: () => void;
@@ -188,29 +203,50 @@ export default function TripGroupChat({
         ) : (
           (Array.isArray(messages) ? messages : []).map((msg) => {
             const isCurrentUser = msg.sender_id === currentUserId;
+            const avatarUrl = getAvatarUrl(msg.sender_avatar_url);
+            
             return (
               <div
                 key={msg.id}
-                className={`flex flex-col ${isCurrentUser ? "items-end" : "items-start"}`}
+                className={`flex items-end gap-2 ${isCurrentUser ? "flex-row-reverse" : "flex-row"}`}
               >
-                {!isCurrentUser && (
-                  <p className="text-xs text-gray-500 mb-1 px-2 font-medium">{msg.sender_name}</p>
-                )}
-                <div
-                  className={`max-w-[70%] rounded-2xl px-4 py-2 ${
-                    isCurrentUser
-                      ? "bg-orange-500 text-white"
-                      : "bg-white text-gray-900 border border-gray-200"
-                  }`}
-                >
-                  <p className="text-sm whitespace-pre-wrap break-words">{msg.message}</p>
-                  <p
-                    className={`text-xs mt-1 ${
-                      isCurrentUser ? "text-orange-100" : "text-gray-500"
+                {/* Avatar - izquierda para otros, derecha para mí */}
+                <div className="flex-shrink-0">
+                  <img
+                    src={avatarUrl}
+                    alt={msg.sender_name}
+                    className="w-8 h-8 rounded-full object-cover"
+                    onError={(e) => {
+                      e.currentTarget.onerror = null;
+                      e.currentTarget.src = "/default-avatar.png";
+                    }}
+                  />
+                </div>
+                
+                {/* Message bubble container */}
+                <div className={`flex flex-col ${isCurrentUser ? "items-end" : "items-start"} max-w-[70%]`}>
+                  {/* Nombre del remitente - siempre visible */}
+                  <p className={`text-xs text-gray-500 mb-1 px-1 font-medium ${isCurrentUser ? "text-right" : "text-left"}`}>
+                    {msg.sender_name}
+                  </p>
+                  
+                  {/* Burbuja del mensaje */}
+                  <div
+                    className={`rounded-2xl px-4 py-2 ${
+                      isCurrentUser
+                        ? "bg-orange-500 text-white rounded-br-sm"
+                        : "bg-white text-gray-900 border border-gray-200 rounded-bl-sm"
                     }`}
                   >
-                    {formatTime(msg.timestamp)}
-                  </p>
+                    <p className="text-sm whitespace-pre-wrap break-words">{msg.message}</p>
+                    <p
+                      className={`text-xs mt-1 ${
+                        isCurrentUser ? "text-orange-100" : "text-gray-500"
+                      }`}
+                    >
+                      {formatTime(msg.timestamp)}
+                    </p>
+                  </div>
                 </div>
               </div>
             );

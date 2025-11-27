@@ -287,16 +287,33 @@ def verify_email(db: Session, email: str, code: str) -> str:
 
 
 def login(db: Session, email: str, password: str) -> str:
-    user = db.query(User).filter(User.email == email).first()
-    if not user or not verify_password(password, user.password_hash):
+    try:
+        user = db.query(User).filter(User.email == email).first()
+        if not user or not verify_password(password, user.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales inválidas"
+            )
+        if not user.is_active:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Usuario deshabilitado")
+        if not user.is_verified:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Email no verificado")
+        
+        # Ensure user.id is valid
+        if user.id is None:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno: ID de usuario inválido")
+        
+        token = create_access_token(sub=str(user.id))
+        return token
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error en login para {email}: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales inválidas"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno del servidor: {str(e)}"
         )
-    if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Usuario deshabilitado")
-    if not user.is_verified:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Email no verificado")
-    return create_access_token(sub=str(user.id))
 
 
 def verify_user_manually(db: Session, email: str) -> None:

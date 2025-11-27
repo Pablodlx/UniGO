@@ -22,6 +22,7 @@ class GroupMessageOut(BaseModel):
     trip_id: int
     sender_id: int
     sender_name: str
+    sender_avatar_url: Optional[str] = None
     message: str
     timestamp: str
 
@@ -106,6 +107,7 @@ def send_message(
         trip_id=message.trip_id,
         sender_id=message.sender_id,
         sender_name=message.sender_name,
+        sender_avatar_url=current_user.avatar_url,
         message=message.message,
         timestamp=message.timestamp.isoformat()
     )
@@ -129,22 +131,31 @@ def get_messages(
             detail="Chat not available"
         )
     
-    # Get all messages for this trip
+    # Get all messages for this trip with sender info
     messages = db.query(TripGroupMessage).filter(
         TripGroupMessage.trip_id == trip_id
     ).order_by(TripGroupMessage.timestamp.asc()).all()
     
-    return [
-        GroupMessageOut(
-            id=msg.id,
-            trip_id=msg.trip_id,
-            sender_id=msg.sender_id,
-            sender_name=msg.sender_name,
-            message=msg.message,
-            timestamp=msg.timestamp.isoformat()
+    # Get sender avatars
+    result = []
+    for msg in messages:
+        # Get sender user to get avatar_url
+        sender_user = db.query(User).filter(User.id == msg.sender_id).first()
+        sender_avatar_url = sender_user.avatar_url if sender_user else None
+        
+        result.append(
+            GroupMessageOut(
+                id=msg.id,
+                trip_id=msg.trip_id,
+                sender_id=msg.sender_id,
+                sender_name=msg.sender_name,
+                sender_avatar_url=sender_avatar_url,
+                message=msg.message,
+                timestamp=msg.timestamp.isoformat()
+            )
         )
-        for msg in messages
-    ]
+    
+    return result
 
 
 class UnreadMessageOut(BaseModel):

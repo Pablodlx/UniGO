@@ -18,8 +18,8 @@ class ProfileBase(BaseModel):
     course: conint(ge=1, le=6) | None = None
     home_address: HomeAddress | None = None
 
-    # Opcional
-    avatar_url: HttpUrl | str | None = None
+    # Opcional - puede ser URL completa o ruta relativa
+    avatar_url: str | None = None
 
 
 class ProfileUpdate(ProfileBase):

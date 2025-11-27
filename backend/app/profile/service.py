@@ -100,19 +100,52 @@ def update_profile(db: Session, user: User, payload: ProfileUpdate) -> ProfileOu
 
 
 async def upload_avatar(db: Session, user: User, file: UploadFile) -> ProfileOut:
-    if file.content_type not in {"image/png", "image/jpeg"}:
-        raise HTTPException(status_code=400, detail="Tipo de archivo no permitido")
+    # Simple validation: check if it's an image
+    content_type = file.content_type or ""
+    if not content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=400, 
+            detail="El archivo debe ser una imagen"
+        )
 
     os.makedirs(AVATAR_DIR, exist_ok=True)
     raw = await file.read()
+    
+    # Optional: validate file size (max 5MB)
+    max_size = 5 * 1024 * 1024  # 5MB
+    if len(raw) > max_size:
+        raise HTTPException(
+            status_code=400,
+            detail="El archivo es demasiado grande. El tamaño máximo es 5MB."
+        )
+    
+    # Generate filename
     digest = hashlib.sha256(raw).hexdigest()[:16]
-    ext = ".jpg" if file.content_type == "image/jpeg" else ".png"
+    # Get extension from content type or filename
+    if content_type == "image/png":
+        ext = ".png"
+    elif content_type in {"image/jpeg", "image/jpg"}:
+        ext = ".jpg"
+    else:
+        # Fallback: try to get from filename
+        filename = file.filename or ""
+        if filename.lower().endswith(".png"):
+            ext = ".png"
+        else:
+            ext = ".jpg"  # Default to jpg
+    
     fname = f"{user.id}_{digest}{ext}"
-    with open(os.path.join(AVATAR_DIR, fname), "wb") as f:
+    filepath = os.path.join(AVATAR_DIR, fname)
+    
+    # Save file
+    with open(filepath, "wb") as f:
         f.write(raw)
 
+    # Update user avatar_url
     user.avatar_url = f"{PUBLIC_PREFIX}/{fname}"
     db.add(user)
     db.commit()
     db.refresh(user)
+    
+    # Return profile with updated avatar_url
     return get_profile(db, user)

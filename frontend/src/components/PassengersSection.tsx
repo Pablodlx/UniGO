@@ -257,6 +257,7 @@ export default function PassengersSection({ rideId, onSeatFreed }: PassengersSec
             setSelectedUserId(null);
           }}
           onSeatFreed={onSeatFreed}
+          showRemoveButton={false}
         />
       )}
     </>

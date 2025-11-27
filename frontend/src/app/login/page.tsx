@@ -26,8 +26,36 @@ export default function LoginPage() {
       });
 
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Login ${res.status}`);
+        let errorText = "";
+        try {
+          errorText = await res.text();
+        } catch {
+          errorText = `Error ${res.status}: ${res.statusText}`;
+        }
+        
+        // Try to parse as JSON
+        let errorMessage = errorText;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.detail || errorJson.message || errorText;
+        } catch {
+          // Not JSON, use text as is
+        }
+        
+        // Replace generic errors with user-friendly messages
+        if (errorMessage.includes("Load failed") || errorMessage.includes("Failed to fetch") || errorMessage.includes("TypeError")) {
+          errorMessage = "Error de conexión. Por favor, verifica que el servidor esté funcionando.";
+        } else if (errorMessage.includes("500") || errorMessage.includes("Internal Server Error") || errorMessage.includes("Error interno")) {
+          errorMessage = "Error del servidor. Por favor, contacta al administrador o intenta más tarde.";
+        } else if (errorMessage.includes("401") || errorMessage.includes("Unauthorized") || errorMessage.includes("Invalid credentials") || errorMessage.includes("Credenciales inválidas")) {
+          errorMessage = "Email o contraseña incorrectos. Por favor, intenta de nuevo.";
+        } else if (errorMessage.includes("403") || errorMessage.includes("Forbidden")) {
+          errorMessage = "No tienes permiso para acceder. Contacta al administrador.";
+        } else if (errorMessage.includes("Email no verificado") || errorMessage.includes("not verified")) {
+          errorMessage = "Email no verificado. Por favor, verifica tu email primero.";
+        }
+        
+        throw new Error(errorMessage);
       }
 
       const data = await res.json();
@@ -41,7 +69,16 @@ export default function LoginPage() {
       // ✅ Redirige directamente a Perfil
       router.replace("/profile");
     } catch (e: unknown) {
-      const errorMessage = e instanceof Error ? e.message : "Error en el login";
+      let errorMessage = "Error en el login";
+      if (e instanceof Error) {
+        errorMessage = e.message;
+        // Replace generic errors
+        if (errorMessage.includes("Load failed") || errorMessage.includes("Failed to fetch") || errorMessage.includes("TypeError")) {
+          errorMessage = "Error de conexión. Por favor, verifica que el servidor esté funcionando.";
+        }
+      } else if (typeof e === "string") {
+        errorMessage = e;
+      }
       setMsg(errorMessage);
     } finally {
       setLoading(false);
