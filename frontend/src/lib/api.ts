@@ -296,6 +296,7 @@ export interface Ride {
   driver_id: number;
   driver_name: string;
   driver_university?: string;
+  driver_avatar_url?: string | null;
   driver_average_rating?: number;
   departure_city: string;
   destination_city: string;
@@ -374,7 +375,7 @@ export interface Passenger {
 
 export interface RideHistoryItem extends Ride {
   role: "conductor" | "pasajero";
-  status?: "cancelled" | "completed";
+  status?: "cancelled" | "completed" | "rejected";
   booking_id?: number;
   has_rated?: boolean;
   can_rate?: boolean;

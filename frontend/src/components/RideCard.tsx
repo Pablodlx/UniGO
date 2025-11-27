@@ -2,6 +2,18 @@
 
 import { useState, useEffect } from "react";
 import { Ride } from "@/lib/api";
+import Image from "next/image";
+
+function getAvatarUrl(avatarUrl: string | null | undefined): string | null {
+  if (!avatarUrl) return null;
+  if (avatarUrl.startsWith("http://") || avatarUrl.startsWith("https://")) {
+    return avatarUrl;
+  }
+  if (avatarUrl.startsWith("/static/avatars/")) {
+    return `${process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"}${avatarUrl}`;
+  }
+  return `${process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"}/static/avatars/${avatarUrl}`;
+}
 
 interface RideCardProps {
   ride: Ride;
@@ -102,10 +114,38 @@ export default function RideCard({ ride, onClick }: RideCardProps) {
 
         {/* Driver Info on the right */}
         <div className="ml-auto flex items-center space-x-3">
-          <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0">
-            <svg className="w-5 h-5 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd"/>
-            </svg>
+          <div className="relative w-10 h-10 flex-shrink-0">
+            {(() => {
+              const avatarUrl = getAvatarUrl(ride.driver_avatar_url);
+              return avatarUrl ? (
+                <>
+                  <Image
+                    src={avatarUrl}
+                    alt={ride.driver_name}
+                    width={40}
+                    height={40}
+                    className="w-10 h-10 rounded-full object-cover"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.style.display = 'none';
+                      const fallback = target.nextElementSibling as HTMLElement;
+                      if (fallback) fallback.style.display = 'flex';
+                    }}
+                  />
+                  <div className="w-10 h-10 bg-gray-200 rounded-full items-center justify-center hidden">
+                    <svg className="w-5 h-5 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd"/>
+                    </svg>
+                  </div>
+                </>
+              ) : (
+                <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center">
+                  <svg className="w-5 h-5 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd"/>
+                  </svg>
+                </div>
+              );
+            })()}
           </div>
           <div>
             <div className="flex items-center space-x-2">

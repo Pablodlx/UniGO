@@ -156,6 +156,7 @@ def get_my_bookings(
                         driver_id=ride.driver_id,
                         driver_name=driver.full_name or driver.email,
                         driver_university=driver.university,
+                        driver_avatar_url=driver.avatar_url,
                         departure_city=ride.departure_city,
                         destination_city=ride.destination_city,
                         departure_lat=ride.departure_lat,
@@ -312,6 +313,7 @@ def get_ride_history(
                 "driver_id": ride.driver_id,
                 "driver_name": driver.full_name or driver.email,
                 "driver_university": driver.university,
+                "driver_avatar_url": driver.avatar_url,
                 "departure_city": ride.departure_city,
                 "departure_lat": ride.departure_lat,
                 "departure_lng": ride.departure_lng,
@@ -342,7 +344,7 @@ def get_ride_history(
     # Add all driver rides to result
     result.extend(driver_rides_map.values())
     
-    # Filter passenger bookings: include past rides OR canceled rides
+    # Filter passenger bookings: include past rides OR canceled rides OR rejected bookings
     for booking in all_bookings:
         ride = db.query(Ride).filter(Ride.id == booking.ride_id).first()
         if ride:
@@ -355,11 +357,17 @@ def get_ride_history(
             # Calculate arrival datetime for rating window calculations
             arrival_datetime = calculate_arrival_datetime(ride)
             
-            # Include if the ride has passed (based on arrival time) OR if it's canceled
-            if check_datetime < now or not ride.is_active:
+            # Include if the ride has passed (based on arrival time) OR if it's canceled OR if booking is rejected
+            is_rejected = booking.status == BookingStatus.rejected
+            if check_datetime < now or not ride.is_active or is_rejected:
                 driver = db.query(User).filter(User.id == ride.driver_id).first()
-                # Determine status: cancelled if not active, completed if past and active
-                status = "cancelled" if not ride.is_active else "completed"
+                # Determine status: cancelled if not active, completed if past and active, rejected if booking is rejected
+                if is_rejected:
+                    status = "rejected"
+                elif not ride.is_active:
+                    status = "cancelled"
+                else:
+                    status = "completed"
                 
                 # For passenger: check if they've rated the driver
                 has_rated = False
@@ -411,6 +419,7 @@ def get_ride_history(
                     "driver_id": ride.driver_id,
                     "driver_name": driver.full_name or driver.email,
                     "driver_university": driver.university,
+                    "driver_avatar_url": driver.avatar_url,
                     "departure_city": ride.departure_city,
                     "departure_lat": ride.departure_lat,
                     "departure_lng": ride.departure_lng,
@@ -579,11 +588,38 @@ def cancel_ride(
     if ride.driver_id != current_user.id:
         raise HTTPException(status_code=403, detail="You can only cancel your own rides")
     
-    # Cancel the ride
-    ride.is_active = False
-    db.commit()
-    
-    return {"message": "Ride canceled successfully", "ride_id": ride_id}
+    try:
+        # Cancel the ride
+        ride.is_active = False
+        
+        # Get all confirmed bookings for this ride to notify passengers
+        confirmed = (
+            db.query(Booking)
+            .filter(
+                Booking.ride_id == ride_id,
+                Booking.status == BookingStatus.confirmed
+            )
+            .all()
+        )
+        
+        # Create notifications for all confirmed passengers (same logic as when passenger cancels)
+        for booking in confirmed:
+            notification = Notification(
+                receiver_id=booking.passenger_id,
+                type="ride_cancelled_by_driver",
+                ride_id=ride.id,
+                message=f"El conductor ha cancelado el viaje {ride.departure_city} → {ride.destination_city}.",
+            )
+            db.add(notification)
+        
+        db.commit()
+        db.refresh(ride)
+        
+        return {"message": "Ride canceled successfully", "ride_id": ride_id}
+    except Exception as e:
+        db.rollback()
+        print(f"Error canceling ride: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to cancel ride: {str(e)}")
 
 
 @router.post("/{ride_id}/cancel-booking")

@@ -236,23 +236,6 @@ export default function PassengersSection({ rideId, onSeatFreed }: PassengersSec
                         )}
                       </div>
 
-                      {/* Remove Button */}
-                      {!user.is_driver && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleRemove(user.id);
-                          }}
-                          disabled={removingId === user.id}
-                          className={`px-4 py-2 rounded-lg font-medium transition-colors text-sm ${
-                            removingId === user.id
-                              ? "bg-gray-400 text-white cursor-not-allowed"
-                              : "bg-red-500 hover:bg-red-600 text-white"
-                          }`}
-                        >
-                          {removingId === user.id ? "Quitando..." : "Eliminar del viaje"}
-                        </button>
-                      )}
                     </div>
                   );
                 })}

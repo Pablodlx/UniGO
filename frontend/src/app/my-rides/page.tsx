@@ -146,7 +146,9 @@ export default function MyRidesPage() {
   const fetchMyBookings = async () => {
     try {
       const bookings = await getMyBookings();
-      setBookings(bookings);
+      // Filter out rejected bookings from "Mis reservas como pasajero"
+      const filteredBookings = bookings.filter((ride) => ride.booking_status !== "rejected");
+      setBookings(filteredBookings);
     } catch (error) {
       console.error("Error fetching bookings:", error);
     }
@@ -342,11 +344,17 @@ export default function MyRidesPage() {
     }
   };
 
-  const getHistoryStatusBadge = (status?: "cancelled" | "completed") => {
+  const getHistoryStatusBadge = (status?: "cancelled" | "completed" | "rejected") => {
     if (status === "cancelled") {
       return (
         <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
           Cancelado
+        </span>
+      );
+    } else if (status === "rejected") {
+      return (
+        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+          Rechazado
         </span>
       );
     } else {

@@ -50,6 +50,7 @@ class RideOut(RideBase):
     driver_id: int
     driver_name: str
     driver_university: Optional[str]
+    driver_avatar_url: Optional[str] = None
     departure_lat: Optional[float] = None
     departure_lng: Optional[float] = None
     destination_lat: Optional[float] = None
