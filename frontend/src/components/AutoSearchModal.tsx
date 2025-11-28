@@ -33,6 +33,7 @@ export default function AutoSearchModal({
   const [specificDates, setSpecificDates] = useState<string[]>([]);
   const [newDate, setNewDate] = useState<string>("");
   const [flexibilityMinutes, setFlexibilityMinutes] = useState<number>(30);
+  const [allowNearbySearch, setAllowNearbySearch] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<{
     origin?: string;
@@ -112,6 +113,7 @@ export default function AutoSearchModal({
         target_time: targetTime,
         specific_dates: specificDates,
         flexibility_minutes: flexibilityMinutes,
+        allow_nearby_search: allowNearbySearch,
       });
 
       onSuccess();
@@ -135,6 +137,7 @@ export default function AutoSearchModal({
     setSpecificDates([]);
     setNewDate("");
     setFlexibilityMinutes(30);
+    setAllowNearbySearch(false);
     setErrors({});
     onClose();
   };
@@ -306,6 +309,25 @@ export default function AutoSearchModal({
                 ))}
               </select>
             </div>
+
+            {/* Allow Nearby Search */}
+            <div className="flex items-center space-x-3">
+              <input
+                type="checkbox"
+                id="allowNearbySearch"
+                checked={allowNearbySearch}
+                onChange={(e) => setAllowNearbySearch(e.target.checked)}
+                className="w-5 h-5 text-green-500 border-gray-300 rounded focus:ring-green-500 focus:ring-2"
+              />
+              <label htmlFor="allowNearbySearch" className="text-sm font-medium text-gray-700 cursor-pointer">
+                Buscar viajes a menos de 1 km de las direcciones especificadas
+              </label>
+            </div>
+            {allowNearbySearch && (
+              <p className="text-xs text-gray-500 -mt-2">
+                Si activas esta opción, también se buscarán y confirmarán automáticamente viajes cercanos (dentro de 1 km) además de los que coincidan exactamente con las direcciones.
+              </p>
+            )}
 
             {/* Buttons */}
             <div className="flex justify-end space-x-4 pt-4">

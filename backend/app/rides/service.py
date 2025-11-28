@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, time as dt_time, timezone
-from typing import List, Optional
+from typing import List, Optional, Tuple
+import math
 
 import pytz
 from sqlalchemy.orm import Session
@@ -9,6 +10,38 @@ from app.auth.models import Ride, User, Booking, BookingStatus, SearchAlert
 from app.rides.schemas import RideCreate, RideOut, RideSearch, PassengerInfo
 from app.core.maps import calculate_travel_time_sync
 from app.notifications.utils import create_notification
+
+
+def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """
+    Calculate the great circle distance between two points on Earth (in kilometers).
+    
+    Args:
+        lat1: Latitude of first point in degrees
+        lon1: Longitude of first point in degrees
+        lat2: Latitude of second point in degrees
+        lon2: Longitude of second point in degrees
+    
+    Returns:
+        Distance in kilometers
+    """
+    # Convert latitude and longitude from degrees to radians
+    lat1_rad = math.radians(lat1)
+    lon1_rad = math.radians(lon1)
+    lat2_rad = math.radians(lat2)
+    lon2_rad = math.radians(lon2)
+    
+    # Haversine formula
+    dlat = lat2_rad - lat1_rad
+    dlon = lon2_rad - lon1_rad
+    
+    a = math.sin(dlat / 2) ** 2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2) ** 2
+    c = 2 * math.asin(math.sqrt(a))
+    
+    # Radius of Earth in kilometers
+    R = 6371.0
+    
+    return R * c
 # Import ratings service defensively to avoid breaking if ratings module has issues
 try:
     from app.ratings import service as ratings_service
@@ -312,10 +345,88 @@ def get_ride_with_driver_info(db: Session, ride_id: int) -> RideOut:
     )
 
 
-def search_rides(db: Session, search_params: RideSearch, exclude_booked_by_user_id: int = None) -> List[RideOut]:
-    """Search rides with optional filters"""
+def _convert_ride_to_rideout(db: Session, ride: Ride, exclude_booked_by_user_id: int = None) -> Optional[RideOut]:
+    """Helper function to convert a Ride to RideOut with driver info"""
+    from app.auth.models import Booking, BookingStatus
+    
+    driver = db.query(User).filter(User.id == ride.driver_id).first()
+    if not driver:
+        return None
+    
+    # Get driver's average rating
+    driver_average_rating = None
+    if ratings_service:
+        try:
+            driver_average_rating = ratings_service.get_user_average_rating(db, driver.id)
+        except Exception:
+            driver_average_rating = None
+    
+    # Calculate driver's completed trips statistics
+    driver_completed_trips, driver_completed_passenger_trips = _get_driver_trip_stats(db, driver.id)
+    
+    # Get first confirmed booking's passenger_id for reserved_by_user_id
+    reserved_by_user_id = None
+    first_booking = db.query(Booking).filter(
+        Booking.ride_id == ride.id,
+        Booking.status == BookingStatus.confirmed
+    ).first()
+    if first_booking:
+        reserved_by_user_id = first_booking.passenger_id
+    
+    # Get all confirmed passengers for this ride
+    passengers_info, passengers_ids = _get_ride_passengers(db, ride.id)
+    
+    arrival_time = calculate_arrival_time_string(ride)
+    
+    return RideOut(
+        id=ride.id,
+        driver_id=ride.driver_id,
+        driver_name=driver.full_name or driver.email,
+        driver_university=driver.university,
+        driver_avatar_url=driver.avatar_url,
+        departure_city=ride.departure_city,
+        destination_city=ride.destination_city,
+        departure_lat=ride.departure_lat,
+        departure_lng=ride.departure_lng,
+        destination_lat=ride.destination_lat,
+        destination_lng=ride.destination_lng,
+        departure_date=ride.departure_date,
+        departure_time=ride.departure_time,
+        available_seats=ride.available_seats,
+        price_per_seat=ride.price_per_seat,
+        vehicle_brand=ride.vehicle_brand,
+        vehicle_color=ride.vehicle_color,
+        additional_details=ride.additional_details,
+        estimated_duration_minutes=ride.estimated_duration_minutes,
+        arrival_time=arrival_time,
+        is_active=ride.is_active,
+        created_at=ride.created_at,
+        driver_average_rating=driver_average_rating,
+        driver_completed_trips=driver_completed_trips,
+        driver_completed_passenger_trips=driver_completed_passenger_trips,
+        reserved_by_user_id=reserved_by_user_id,
+        passengers=passengers_info,
+        passengers_ids=passengers_ids,
+    )
+
+
+def search_rides(db: Session, search_params: RideSearch, exclude_booked_by_user_id: int = None) -> Tuple[List[RideOut], List[dict]]:
+    """
+    Search rides with optional filters.
+    Returns a tuple of (exact_matches, nearby_matches).
+    """
     from datetime import timezone
     
+    # Get booked ride IDs if user ID is provided
+    booked_ride_ids = set()
+    if exclude_booked_by_user_id:
+        from app.auth.models import Booking
+        booked_ride_ids = {b.ride_id for b in db.query(Booking).filter(
+            Booking.passenger_id == exclude_booked_by_user_id,
+            Booking.status != "canceled"
+        ).all()}
+    
+    # Build query for exact matches
     query = db.query(Ride).join(User).filter(Ride.is_active == True, Ride.available_seats > 0)
     
     # Apply filters if provided
@@ -327,90 +438,95 @@ def search_rides(db: Session, search_params: RideSearch, exclude_booked_by_user_
     
     if search_params.departure_date:
         # Filter by date - show rides on or after the search date
-        # Normalize search date to start of day for comparison
         search_date_start = search_params.departure_date.replace(hour=0, minute=0, second=0, microsecond=0)
-        # Ensure timezone awareness
         if search_date_start.tzinfo is None:
             search_date_start = search_date_start.replace(tzinfo=timezone.utc)
         query = query.filter(Ride.departure_date >= search_date_start)
     else:
-        # If no date provided, filter out past rides by comparing with today
+        # If no date provided, filter out past rides
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         query = query.filter(Ride.departure_date >= today_start)
     
     # Order by departure date (soonest first)
-    rides = query.order_by(Ride.departure_date.asc(), Ride.departure_time.asc()).all()
+    exact_rides = query.order_by(Ride.departure_date.asc(), Ride.departure_time.asc()).all()
     
-    # If user ID is provided, filter out rides they've already booked
-    if exclude_booked_by_user_id:
-        from app.auth.models import Booking
-        booked_ride_ids = {b.ride_id for b in db.query(Booking).filter(Booking.passenger_id == exclude_booked_by_user_id, Booking.status != "canceled").all()}
-        rides = [r for r in rides if r.id not in booked_ride_ids]
+    # Filter out booked rides
+    exact_rides = [r for r in exact_rides if r.id not in booked_ride_ids]
     
-    # Convert to RideOut with driver info
-    from app.auth.models import Booking, BookingStatus
+    # Convert to RideOut
+    exact_matches = []
+    for ride in exact_rides:
+        ride_out = _convert_ride_to_rideout(db, ride, exclude_booked_by_user_id)
+        if ride_out:
+            exact_matches.append(ride_out)
     
-    result = []
-    for ride in rides:
-        driver = db.query(User).filter(User.id == ride.driver_id).first()
-        # Get driver's average rating (gracefully handle if ratings table doesn't exist)
-        driver_average_rating = None
-        if ratings_service:
-            try:
-                driver_average_rating = ratings_service.get_user_average_rating(db, driver.id)
-            except Exception:
-                driver_average_rating = None
-        
-        # Calculate driver's completed trips statistics
-        driver_completed_trips, driver_completed_passenger_trips = _get_driver_trip_stats(db, driver.id)
-        
-        # Get first confirmed booking's passenger_id for reserved_by_user_id
-        reserved_by_user_id = None
-        first_booking = db.query(Booking).filter(
-            Booking.ride_id == ride.id,
-            Booking.status == BookingStatus.confirmed
-        ).first()
-        if first_booking:
-            reserved_by_user_id = first_booking.passenger_id
-        
-        # Get all confirmed passengers for this ride
-        passengers_info, passengers_ids = _get_ride_passengers(db, ride.id)
-        
-        arrival_time = calculate_arrival_time_string(ride)
-        
-        result.append(RideOut(
-            id=ride.id,
-            driver_id=ride.driver_id,
-            driver_name=driver.full_name or driver.email,
-            driver_university=driver.university,
-            driver_avatar_url=driver.avatar_url,
-            departure_city=ride.departure_city,
-            destination_city=ride.destination_city,
-            departure_lat=ride.departure_lat,
-            departure_lng=ride.departure_lng,
-            destination_lat=ride.destination_lat,
-            destination_lng=ride.destination_lng,
-            departure_date=ride.departure_date,
-            departure_time=ride.departure_time,
-            available_seats=ride.available_seats,
-            price_per_seat=ride.price_per_seat,
-            vehicle_brand=ride.vehicle_brand,
-            vehicle_color=ride.vehicle_color,
-            additional_details=ride.additional_details,
-            estimated_duration_minutes=ride.estimated_duration_minutes,
-            arrival_time=arrival_time,
-            is_active=ride.is_active,
-            created_at=ride.created_at,
-            driver_average_rating=driver_average_rating,
-            driver_completed_trips=driver_completed_trips,
-            driver_completed_passenger_trips=driver_completed_passenger_trips,
-            reserved_by_user_id=reserved_by_user_id,
-            passengers=passengers_info,
-            passengers_ids=passengers_ids,
-        ))
+    # If there are exact matches, return them and empty nearby_matches
+    if len(exact_matches) > 0:
+        return exact_matches, []
     
-    return result
+    # If no exact matches and coordinates are provided, search for nearby rides
+    nearby_matches = []
+    if (search_params.departure_lat is not None and search_params.departure_lng is not None and
+        search_params.destination_lat is not None and search_params.destination_lng is not None):
+        
+        # Query all active rides with available seats and coordinates
+        nearby_query = db.query(Ride).join(User).filter(
+            Ride.is_active == True,
+            Ride.available_seats > 0,
+            Ride.departure_lat.isnot(None),
+            Ride.departure_lng.isnot(None),
+            Ride.destination_lat.isnot(None),
+            Ride.destination_lng.isnot(None),
+        )
+        
+        # Apply date filter if provided
+        if search_params.departure_date:
+            search_date_start = search_params.departure_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            if search_date_start.tzinfo is None:
+                search_date_start = search_date_start.replace(tzinfo=timezone.utc)
+            nearby_query = nearby_query.filter(Ride.departure_date >= search_date_start)
+        else:
+            now = datetime.now(timezone.utc)
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            nearby_query = nearby_query.filter(Ride.departure_date >= today_start)
+        
+        all_nearby_rides = nearby_query.order_by(Ride.departure_date.asc(), Ride.departure_time.asc()).all()
+        
+        # Filter out booked rides
+        all_nearby_rides = [r for r in all_nearby_rides if r.id not in booked_ride_ids]
+        
+        # Check distance for each ride
+        for ride in all_nearby_rides:
+            if ride.departure_lat is None or ride.departure_lng is None or ride.destination_lat is None or ride.destination_lng is None:
+                continue
+            
+            # Calculate distances
+            origin_dist = haversine(
+                search_params.departure_lat,
+                search_params.departure_lng,
+                ride.departure_lat,
+                ride.departure_lng
+            )
+            
+            dest_dist = haversine(
+                search_params.destination_lat,
+                search_params.destination_lng,
+                ride.destination_lat,
+                ride.destination_lng
+            )
+            
+            # If both distances are <= 1 km, add to nearby matches
+            if origin_dist <= 1.0 and dest_dist <= 1.0:
+                ride_out = _convert_ride_to_rideout(db, ride, exclude_booked_by_user_id)
+                if ride_out:
+                    # Convert RideOut to dict and add distance info
+                    ride_dict = ride_out.model_dump()
+                    ride_dict["origin_distance_km"] = origin_dist
+                    ride_dict["destination_distance_km"] = dest_dist
+                    nearby_matches.append(ride_dict)
+    
+    return exact_matches, nearby_matches
 
 
 def get_user_rides(db: Session, user_id: int) -> List[RideOut]:
@@ -535,24 +651,61 @@ def match_search_alerts_with_trip(db: Session, trip: Ride) -> None:
     # Get trip date (without time)
     trip_date = trip.departure_date.date()
     
-    # Find all active search alerts that match:
-    # 1. Destination matches (case-insensitive, partial match)
-    # 2. Origin matches (case-insensitive, partial match) - optional
-    # 3. Date matches (specific_dates has priority over days_of_week)
-    # 4. Time is within flexibility range
-    from sqlalchemy import func, text
-    
-    # Query alerts that match destination
+    # Find all active search alerts
+    # We'll check both text matching and distance matching
     all_alerts = db.query(SearchAlert).filter(
         SearchAlert.active == True,
-        SearchAlert.destination.ilike(f"%{trip.destination_city}%"),
     ).all()
     
-    # Filter in Python to check date matching (specific_dates has priority)
+    # Filter in Python to check:
+    # 1. Destination matches (text OR distance ≤1 km)
+    # 2. Origin matches (text OR distance ≤1 km) - optional
+    # 3. Date matches (specific_dates has priority over days_of_week)
+    # 4. Time is within flexibility range
     matching_alerts = []
     for alert in all_alerts:
-        date_matches = False
+        # Check destination match (text OR distance)
+        destination_matches = False
+        if trip.destination_city and alert.destination:
+            # Text match
+            destination_matches = trip.destination_city.lower() in alert.destination.lower() or alert.destination.lower() in trip.destination_city.lower()
         
+        # Distance match (only if allow_nearby_search is True and coordinates available)
+        if not destination_matches and alert.allow_nearby_search and alert.destination_lat is not None and alert.destination_lng is not None and trip.destination_lat is not None and trip.destination_lng is not None:
+            dest_dist = haversine(
+                alert.destination_lat,
+                alert.destination_lng,
+                trip.destination_lat,
+                trip.destination_lng
+            )
+            destination_matches = dest_dist <= 1.0
+        
+        if not destination_matches:
+            continue
+        
+        # Check origin match - optional
+        origin_matches = True  # Default to True if no origin specified
+        if alert.origin:
+            origin_matches = False
+            if trip.departure_city:
+                # Text match
+                origin_matches = trip.departure_city.lower() in alert.origin.lower() or alert.origin.lower() in trip.departure_city.lower()
+            
+            # Distance match (only if allow_nearby_search is True and coordinates available and text didn't match)
+            if not origin_matches and alert.allow_nearby_search and alert.origin_lat is not None and alert.origin_lng is not None and trip.departure_lat is not None and trip.departure_lng is not None:
+                origin_dist = haversine(
+                    alert.origin_lat,
+                    alert.origin_lng,
+                    trip.departure_lat,
+                    trip.departure_lng
+                )
+                origin_matches = origin_dist <= 1.0
+        
+        if not origin_matches:
+            continue
+        
+        # Check date matching
+        date_matches = False
         # CASE 1: Alert uses specific_dates (PRIORITY)
         if alert.specific_dates and len(alert.specific_dates) > 0:
             date_matches = trip_date in alert.specific_dates
@@ -567,12 +720,9 @@ def match_search_alerts_with_trip(db: Session, trip: Ride) -> None:
         if date_matches:
             matching_alerts.append(alert)
     
-    print(f"Found {len(matching_alerts)} active search alerts for destination '{trip.destination_city}' on date {trip_date} (day {trip_day_of_week})")
+    print(f"Found {len(matching_alerts)} active search alerts matching trip {trip.id} (destination: '{trip.destination_city}', date: {trip_date}, day: {trip_day_of_week})")
     
     for alert in matching_alerts:
-        # Skip if origin doesn't match (optional check)
-        if alert.origin and not trip.departure_city.lower() in alert.origin.lower() and not alert.origin.lower() in trip.departure_city.lower():
-            continue
         
         # Parse alert target_time (format: "HH:MM")
         try:
@@ -665,24 +815,59 @@ def match_existing_trips_with_alert(db: Session, alert: SearchAlert) -> None:
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     
-    # Find all active trips that match:
-    # 1. Destination matches (case-insensitive, partial match)
-    # 2. Origin matches (case-insensitive, partial match) - optional
-    # 3. Date matches (specific_dates has priority over days_of_week)
-    # 4. Time is within flexibility range
-    # 5. Trip is in the future
+    # Find all active trips in the future
+    # We'll check both text matching and distance matching
     all_trips = db.query(Ride).filter(
         Ride.is_active == True,
         Ride.available_seats > 0,
         Ride.departure_date >= today_start,  # Only future trips
-        Ride.destination_city.ilike(f"%{alert.destination}%"),
     ).all()
     
-    # Filter trips that match the alert criteria
+    # Filter trips that match the alert criteria:
+    # 1. Destination matches (text OR distance ≤1 km)
+    # 2. Origin matches (text OR distance ≤1 km) - optional
+    # 3. Date matches (specific_dates has priority over days_of_week)
+    # 4. Time is within flexibility range
     matching_trips = []
     for trip in all_trips:
-        # Skip if origin doesn't match (optional check)
-        if alert.origin and not trip.departure_city.lower() in alert.origin.lower() and not alert.origin.lower() in trip.departure_city.lower():
+        # Check destination match (text OR distance)
+        destination_matches = False
+        if trip.destination_city and alert.destination:
+            # Text match
+            destination_matches = trip.destination_city.lower() in alert.destination.lower() or alert.destination.lower() in trip.destination_city.lower()
+        
+        # Distance match (only if allow_nearby_search is True and coordinates available)
+        if not destination_matches and alert.allow_nearby_search and alert.destination_lat is not None and alert.destination_lng is not None and trip.destination_lat is not None and trip.destination_lng is not None:
+            dest_dist = haversine(
+                alert.destination_lat,
+                alert.destination_lng,
+                trip.destination_lat,
+                trip.destination_lng
+            )
+            destination_matches = dest_dist <= 1.0
+        
+        if not destination_matches:
+            continue
+        
+        # Check origin match - optional
+        origin_matches = True  # Default to True if no origin specified
+        if alert.origin:
+            origin_matches = False
+            if trip.departure_city:
+                # Text match
+                origin_matches = trip.departure_city.lower() in alert.origin.lower() or alert.origin.lower() in trip.departure_city.lower()
+            
+            # Distance match (only if allow_nearby_search is True and coordinates available and text didn't match)
+            if not origin_matches and alert.allow_nearby_search and alert.origin_lat is not None and alert.origin_lng is not None and trip.departure_lat is not None and trip.departure_lng is not None:
+                origin_dist = haversine(
+                    alert.origin_lat,
+                    alert.origin_lng,
+                    trip.departure_lat,
+                    trip.departure_lng
+                )
+                origin_matches = origin_dist <= 1.0
+        
+        if not origin_matches:
             continue
         
         # Check date matching
@@ -808,18 +993,54 @@ def match_trips_for_specific_dates(
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     
-    # Find all active trips that match destination
+    # Find all active trips in the future
+    # We'll check both text matching and distance matching
     all_trips = db.query(Ride).filter(
         Ride.is_active == True,
         Ride.available_seats > 0,
         Ride.departure_date >= today_start,
-        Ride.destination_city.ilike(f"%{alert.destination}%"),
     ).all()
     
     matching_trips = []
     for trip in all_trips:
-        # Skip if origin doesn't match
-        if alert.origin and not trip.departure_city.lower() in alert.origin.lower() and not alert.origin.lower() in trip.departure_city.lower():
+        # Check destination match (text OR distance)
+        destination_matches = False
+        if trip.destination_city and alert.destination:
+            # Text match
+            destination_matches = trip.destination_city.lower() in alert.destination.lower() or alert.destination.lower() in trip.destination_city.lower()
+        
+        # Distance match (only if allow_nearby_search is True and coordinates available)
+        if not destination_matches and alert.allow_nearby_search and alert.destination_lat is not None and alert.destination_lng is not None and trip.destination_lat is not None and trip.destination_lng is not None:
+            dest_dist = haversine(
+                alert.destination_lat,
+                alert.destination_lng,
+                trip.destination_lat,
+                trip.destination_lng
+            )
+            destination_matches = dest_dist <= 1.0
+        
+        if not destination_matches:
+            continue
+        
+        # Check origin match - optional
+        origin_matches = True  # Default to True if no origin specified
+        if alert.origin:
+            origin_matches = False
+            if trip.departure_city:
+                # Text match
+                origin_matches = trip.departure_city.lower() in alert.origin.lower() or alert.origin.lower() in trip.departure_city.lower()
+            
+            # Distance match (only if allow_nearby_search is True and coordinates available and text didn't match)
+            if not origin_matches and alert.allow_nearby_search and alert.origin_lat is not None and alert.origin_lng is not None and trip.departure_lat is not None and trip.departure_lng is not None:
+                origin_dist = haversine(
+                    alert.origin_lat,
+                    alert.origin_lng,
+                    trip.departure_lat,
+                    trip.departure_lng
+                )
+                origin_matches = origin_dist <= 1.0
+        
+        if not origin_matches:
             continue
         
         # Check if trip date is in target_dates
@@ -1010,4 +1231,156 @@ def cancel_auto_bookings_for_dates(
             traceback.print_exc()
             continue
     
-    print(f"Canceled {canceled_count} auto-bookings for removed dates from alert {alert.id}")
+        print(f"Canceled {canceled_count} auto-bookings for removed dates from alert {alert.id}")
+
+
+def cancel_all_auto_bookings_for_alert(db: Session, alert: SearchAlert) -> None:
+    """
+    Cancel all automatic bookings associated with an alert when the alert is deleted.
+    Marks them as 'rejected' and notifies the driver if they were confirmed.
+    
+    Args:
+        db: Database session
+        alert: The SearchAlert object being deleted
+    """
+    from datetime import date as date_type
+    
+    # Parse alert target_time
+    try:
+        alert_time_parts = alert.target_time.split(":")
+        alert_hour = int(alert_time_parts[0])
+        alert_minute = int(alert_time_parts[1])
+        alert_time_minutes = alert_hour * 60 + alert_minute
+    except (ValueError, IndexError):
+        print(f"Invalid alert target_time format: {alert.target_time}")
+        return
+    
+    # Get alert dates (specific_dates has priority over days_of_week)
+    alert_dates = set()
+    if alert.specific_dates and len(alert.specific_dates) > 0:
+        alert_dates = set(alert.specific_dates)
+    elif alert.days_of_week and len(alert.days_of_week) > 0:
+        # Convert days_of_week to dates (we'll check if ride date's weekday matches)
+        # For now, we'll match any ride that matches the criteria
+        pass
+    
+    # Find all bookings for the alert user that are pending or confirmed
+    user_bookings = db.query(Booking).join(Ride).filter(
+        Booking.passenger_id == alert.user_id,
+        Booking.status.in_([BookingStatus.pending, BookingStatus.confirmed]),
+        Ride.is_active == True,
+    ).all()
+    
+    canceled_count = 0
+    for booking in user_bookings:
+        ride = booking.ride
+        if not ride:
+            continue
+        
+        # Check if ride matches alert criteria
+        # Destination match (text OR distance if allow_nearby_search)
+        destination_matches = False
+        if ride.destination_city and alert.destination:
+            destination_matches = ride.destination_city.lower() in alert.destination.lower() or alert.destination.lower() in ride.destination_city.lower()
+        
+        if not destination_matches and alert.allow_nearby_search and alert.destination_lat is not None and alert.destination_lng is not None and ride.destination_lat is not None and ride.destination_lng is not None:
+            dest_dist = haversine(
+                alert.destination_lat,
+                alert.destination_lng,
+                ride.destination_lat,
+                ride.destination_lng
+            )
+            destination_matches = dest_dist <= 1.0
+        
+        if not destination_matches:
+            continue
+        
+        # Origin match (text OR distance if allow_nearby_search)
+        origin_matches = True  # Default to True if no origin specified
+        if alert.origin:
+            origin_matches = False
+            if ride.departure_city:
+                origin_matches = ride.departure_city.lower() in alert.origin.lower() or alert.origin.lower() in ride.departure_city.lower()
+            
+            if not origin_matches and alert.allow_nearby_search and alert.origin_lat is not None and alert.origin_lng is not None and ride.departure_lat is not None and ride.departure_lng is not None:
+                origin_dist = haversine(
+                    alert.origin_lat,
+                    alert.origin_lng,
+                    ride.departure_lat,
+                    ride.departure_lng
+                )
+                origin_matches = origin_dist <= 1.0
+        
+        if not origin_matches:
+            continue
+        
+        # Date match
+        ride_date = ride.departure_date.date()
+        ride_day_of_week = ride.departure_date.weekday()
+        date_matches = False
+        
+        if alert.specific_dates and len(alert.specific_dates) > 0:
+            date_matches = ride_date in alert.specific_dates
+        elif alert.days_of_week and len(alert.days_of_week) > 0:
+            date_matches = ride_day_of_week in alert.days_of_week
+        else:
+            continue  # No date criteria, skip
+        
+        if not date_matches:
+            continue
+        
+        # Time match (within flexibility)
+        try:
+            ride_time_parts = ride.departure_time.split(":")
+            ride_hour = int(ride_time_parts[0])
+            ride_minute = int(ride_time_parts[1])
+            ride_time_minutes = ride_hour * 60 + ride_minute
+        except (ValueError, IndexError):
+            continue
+        
+        time_diff = abs(ride_time_minutes - alert_time_minutes)
+        if time_diff > alert.flexibility_minutes:
+            continue
+        
+        # This booking matches the alert criteria - reject it (so it appears in registro)
+        try:
+            was_confirmed = booking.status == BookingStatus.confirmed
+            
+            # Reject the booking (so it appears in registro as rejected)
+            booking.status = BookingStatus.rejected
+            
+            # If it was confirmed, restore seats and notify driver
+            if was_confirmed:
+                ride.available_seats += booking.seats
+                
+                # Get passenger user for notification
+                passenger = db.query(User).filter(User.id == alert.user_id).first()
+                passenger_name = passenger.full_name if passenger and passenger.full_name else (passenger.email if passenger else "Un pasajero")
+                
+                # Create notification for the driver (same as when passenger cancels)
+                notification = create_notification(
+                    db=db,
+                    receiver_id=ride.driver_id,
+                    type="booking_cancelled",
+                    message=(
+                        f"El pasajero {passenger_name} "
+                        f"ha cancelado su reserva para el viaje "
+                        f"{ride.departure_city} → {ride.destination_city} "
+                        f"debido a que eliminó su alerta de búsqueda automática."
+                    ),
+                    ride_id=ride.id,
+                )
+                db.add(notification)
+            
+            db.commit()
+            canceled_count += 1
+            print(f"Rejected auto-booking {booking.id} for deleted alert {alert.id}")
+            
+        except Exception as e:
+            db.rollback()
+            print(f"Error rejecting booking {booking.id}: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
+    
+    print(f"Rejected {canceled_count} auto-bookings for deleted alert {alert.id}")

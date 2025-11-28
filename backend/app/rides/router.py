@@ -38,18 +38,23 @@ def create_ride(
         raise HTTPException(status_code=500, detail=f"Error creating ride: {str(e)}")
 
 
-@router.get("/search", response_model=List[RideOut])
+@router.get("/search", response_model=dict)
 def search_rides(
     departure_city: str = Query(None, description="Filter by departure city"),
     destination_city: str = Query(None, description="Filter by destination city"),
     departure_date: str = Query(None, description="Filter by departure date (YYYY-MM-DD)"),
+    departure_lat: float = Query(None, description="Departure latitude for nearby search"),
+    departure_lng: float = Query(None, description="Departure longitude for nearby search"),
+    destination_lat: float = Query(None, description="Destination latitude for nearby search"),
+    destination_lng: float = Query(None, description="Destination longitude for nearby search"),
     db: Session = Depends(get_db),
     authorization: str = Header(None)  # Get authorization header
 ):
-    """Search rides with optional filters. If no filters provided, returns all active rides ordered by departure date."""
+    """Search rides with optional filters. Returns exact_matches and nearby_matches."""
     from datetime import datetime
     from jose import JWTError, jwt
     from app.core.config import settings
+    from app.rides.schemas import SearchRidesResponse
     
     search_params = RideSearch()
     
@@ -63,6 +68,16 @@ def search_rides(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
     
+    # Add coordinates if provided
+    if departure_lat is not None:
+        search_params.departure_lat = departure_lat
+    if departure_lng is not None:
+        search_params.departure_lng = departure_lng
+    if destination_lat is not None:
+        search_params.destination_lat = destination_lat
+    if destination_lng is not None:
+        search_params.destination_lng = destination_lng
+    
     # Try to get user ID from authorization header
     user_id = None
     if authorization and authorization.startswith("Bearer "):
@@ -73,7 +88,12 @@ def search_rides(
         except (JWTError, ValueError, KeyError):
             pass  # Invalid token, continue as anonymous
     
-    return service.search_rides(db, search_params, exclude_booked_by_user_id=user_id)
+    exact_matches, nearby_matches = service.search_rides(db, search_params, exclude_booked_by_user_id=user_id)
+    
+    return {
+        "exact_matches": [ride.model_dump() for ride in exact_matches],
+        "nearby_matches": nearby_matches
+    }
 
 
 @router.get("/my-rides", response_model=List[RideOut])

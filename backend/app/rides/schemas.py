@@ -75,6 +75,11 @@ class RideSearch(BaseModel):
     departure_city: Optional[str] = None
     destination_city: Optional[str] = None
     departure_date: Optional[datetime] = None
+    # Optional coordinates for nearby search
+    departure_lat: Optional[float] = None
+    departure_lng: Optional[float] = None
+    destination_lat: Optional[float] = None
+    destination_lng: Optional[float] = None
 
 
 class Passenger(BaseModel):
@@ -84,3 +89,8 @@ class Passenger(BaseModel):
     passenger_avatar: Optional[str] = None
     has_rated: bool = False
     can_rate: bool = False
+
+
+class SearchRidesResponse(BaseModel):
+    exact_matches: List[RideOut] = []
+    nearby_matches: List[dict] = []  # RideOut with additional distance fields

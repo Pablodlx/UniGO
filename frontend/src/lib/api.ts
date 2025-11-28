@@ -329,17 +329,33 @@ export interface Ride {
   booking_status?: string | null; // Status of the booking: "pending", "confirmed", "rejected"
 }
 
+export interface SearchRidesResponse {
+  exact_matches: Ride[];
+  nearby_matches: (Ride & {
+    origin_distance_km: number;
+    destination_distance_km: number;
+  })[];
+}
+
 export async function searchRides(params: {
   departure_city?: string;
   destination_city?: string;
   departure_date?: string;
-}): Promise<Ride[]> {
+  departure_lat?: number;
+  departure_lng?: number;
+  destination_lat?: number;
+  destination_lng?: number;
+}): Promise<SearchRidesResponse> {
   const queryParams = new URLSearchParams();
   if (params.departure_city) queryParams.append('departure_city', params.departure_city);
   if (params.destination_city) queryParams.append('destination_city', params.destination_city);
   if (params.departure_date) queryParams.append('departure_date', params.departure_date);
+  if (params.departure_lat !== undefined) queryParams.append('departure_lat', params.departure_lat.toString());
+  if (params.departure_lng !== undefined) queryParams.append('departure_lng', params.departure_lng.toString());
+  if (params.destination_lat !== undefined) queryParams.append('destination_lat', params.destination_lat.toString());
+  if (params.destination_lng !== undefined) queryParams.append('destination_lng', params.destination_lng.toString());
 
-  return fetchJson<Ride[]>(`${BASE}/rides/search?${queryParams.toString()}`);
+  return fetchJson<SearchRidesResponse>(`${BASE}/rides/search?${queryParams.toString()}`);
 }
 
 export async function getRide(ride_id: number): Promise<Ride> {
@@ -898,6 +914,7 @@ export interface CreateSearchAlertRequest {
   days_of_week?: number[]; // 0-6 (Monday-Sunday), optional
   specific_dates?: string[]; // YYYY-MM-DD format, optional
   flexibility_minutes: number;
+  allow_nearby_search: boolean;
 }
 
 export interface SearchAlert {
@@ -908,6 +925,7 @@ export interface SearchAlert {
   target_time: string;
   days_of_week: number[];
   flexibility_minutes: number;
+  allow_nearby_search: boolean;
   active: boolean;
   created_at: string;
 }
@@ -946,6 +964,7 @@ export interface UpdateSearchAlertRequest {
   days_of_week?: number[];
   specific_dates?: string[];
   flexibility_minutes?: number;
+  allow_nearby_search?: boolean;
   active?: boolean;
 }
 

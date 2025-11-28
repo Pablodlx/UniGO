@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import DesktopLayout from "@/components/DesktopLayout";
-import { getToken, Ride, getProfile, getRide } from "@/lib/api";
+import { getToken, Ride, getProfile, getRide, SearchRidesResponse } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import RideCard from "@/components/RideCard";
@@ -21,7 +21,7 @@ type ViewState = 'search' | 'results' | 'detail';
 export default function Home() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentView, setCurrentView] = useState<ViewState>('search');
-  const [searchResults, setSearchResults] = useState<Ride[]>([]);
+  const [searchResults, setSearchResults] = useState<SearchRidesResponse>({ exact_matches: [], nearby_matches: [] });
   const { showToast, ToastComponent } = useToast();
   const [selectedRide, setSelectedRide] = useState<Ride | null>(null);
   const [searchParams, setSearchParams] = useState<{from: AddressValue | null, to: AddressValue | null, date: string} | null>(null);
@@ -136,6 +136,15 @@ export default function Home() {
       if (date) {
         params.append('departure_date', date);
       }
+      // Add coordinates if available
+      if (fromAddress && fromAddress.lat !== undefined && fromAddress.lng !== undefined) {
+        params.append('departure_lat', fromAddress.lat.toString());
+        params.append('departure_lng', fromAddress.lng.toString());
+      }
+      if (toAddress && toAddress.lat !== undefined && toAddress.lng !== undefined) {
+        params.append('destination_lat', toAddress.lat.toString());
+        params.append('destination_lng', toAddress.lng.toString());
+      }
 
       const token = getToken();
       const headers: Record<string, string> = {};
@@ -150,23 +159,28 @@ export default function Home() {
         throw new Error(`Search failed: ${response.status}`);
       }
 
-      const rides = await response.json();
-      console.log("Search results:", rides);
+      const searchResponse: SearchRidesResponse = await response.json();
+      console.log("Search results:", searchResponse);
       
-      // Update state with results - filter out current user's rides
-      console.log("Current user ID:", currentUserId);
-      console.log("Search results before filtering:", rides);
+      // Filter out current user's rides from both exact and nearby matches
+      const filterRides = (rides: Ride[]) => {
+        return currentUserId 
+          ? rides.filter((ride: Ride) => {
+              const shouldShow = ride.driver_id !== currentUserId;
+              console.log(`Ride ${ride.id}: driver_id=${ride.driver_id}, shouldShow=${shouldShow}`);
+              return shouldShow;
+            })
+          : rides;
+      };
       
-      const filteredRides = currentUserId 
-        ? rides.filter((ride: Ride) => {
-            const shouldShow = ride.driver_id !== currentUserId;
-            console.log(`Ride ${ride.id}: driver_id=${ride.driver_id}, shouldShow=${shouldShow}`);
-            return shouldShow;
-          })
-        : rides;
+      const filteredExact = filterRides(searchResponse.exact_matches);
+      const filteredNearby = filterRides(searchResponse.nearby_matches);
       
-      console.log("Search results after filtering:", filteredRides);
-      setSearchResults(filteredRides);
+      console.log("Search results after filtering:", { exact: filteredExact, nearby: filteredNearby });
+      setSearchResults({
+        exact_matches: filteredExact,
+        nearby_matches: filteredNearby
+      });
       setSearchParams({ from: fromAddress, to: toAddress, date });
       
       // Save search history
@@ -264,13 +278,18 @@ export default function Home() {
         const updatedRide = { ...selectedRide, available_seats: selectedRide.available_seats - 1 };
         setSelectedRide(updatedRide);
         // Also update in search results if it's there
-        setSearchResults(prevResults => 
-          prevResults.map(ride => 
+        setSearchResults(prevResults => ({
+          exact_matches: prevResults.exact_matches.map(ride => 
+            ride.id === selectedRide.id 
+              ? { ...ride, available_seats: ride.available_seats - 1 }
+              : ride
+          ),
+          nearby_matches: prevResults.nearby_matches.map(ride => 
             ride.id === selectedRide.id 
               ? { ...ride, available_seats: ride.available_seats - 1 }
               : ride
           )
-        );
+        }));
       } else {
         const errorText = await response.text();
         let errorDetail = "";
@@ -493,7 +512,7 @@ export default function Home() {
           </div>
 
           {/* Verified Students Badge - Below Form */}
-          {searchResults.length === 0 && (
+          {searchResults.exact_matches.length === 0 && searchResults.nearby_matches.length === 0 && (
             <div className="bg-white border border-orange-200 rounded-full px-8 py-3 mb-8 shadow-lg">
               <div className="flex items-center space-x-3">
                 <svg className="w-6 h-6 text-orange-500" fill="currentColor" viewBox="0 0 20 20">
@@ -505,7 +524,7 @@ export default function Home() {
           )}
 
           {/* Main Headline - Below Form */}
-          {searchResults.length === 0 && (
+          {searchResults.exact_matches.length === 0 && searchResults.nearby_matches.length === 0 && (
             <div className="text-center mb-8">
               <h1 className="text-5xl font-bold text-white mb-4 leading-tight tracking-tight">
                 Comparte Viajes,<br />
@@ -553,14 +572,34 @@ export default function Home() {
               </div>
 
               {/* Show Results or No Results Message */}
-              {searchResults.length > 0 ? (
+              {searchResults.exact_matches.length > 0 ? (
                 <div className="space-y-4">
-                  {searchResults.map((ride) => (
+                  {searchResults.exact_matches.map((ride) => (
                     <RideCard 
                       key={ride.id} 
                       ride={ride} 
                       onClick={() => handleRideClick(ride)}
                     />
+                  ))}
+                </div>
+              ) : searchResults.nearby_matches.length > 0 ? (
+                <div className="space-y-4">
+                  <div className="bg-purple-50 border border-purple-200 rounded-xl p-6 mb-6">
+                    <p className="text-purple-800 text-lg font-semibold">
+                      No hay viajes disponibles exactamente en ese origen y destino,
+                      pero encontramos algunos cerca de ti:
+                    </p>
+                  </div>
+                  {searchResults.nearby_matches.map((ride) => (
+                    <div key={ride.id} className="relative">
+                      <RideCard 
+                        ride={ride} 
+                        onClick={() => handleRideClick(ride)}
+                      />
+                      <span className="absolute top-4 right-4 z-10 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full font-medium shadow-sm">
+                        ✨ Cerca de ti (a {Math.round(ride.origin_distance_km * 1000)} m)
+                      </span>
+                    </div>
                   ))}
                 </div>
               ) : (

@@ -393,6 +393,7 @@ function EditAlertModal({
   const [specificDates, setSpecificDates] = useState<string[]>([]);
   const [newDate, setNewDate] = useState<string>("");
   const [flexibilityMinutes, setFlexibilityMinutes] = useState<number>(30);
+  const [allowNearbySearch, setAllowNearbySearch] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<{
     origin?: string;
@@ -425,6 +426,7 @@ function EditAlertModal({
       setTargetTime(alert.target_time);
       setSpecificDates(alert.specific_dates || []);
       setFlexibilityMinutes(alert.flexibility_minutes);
+      setAllowNearbySearch(alert.allow_nearby_search || false);
     } else if (!alert && isOpen) {
       // Reset for new alert
       setOrigin(null);
@@ -433,6 +435,7 @@ function EditAlertModal({
       setSpecificDates([]);
       setNewDate("");
       setFlexibilityMinutes(30);
+      setAllowNearbySearch(false);
       setErrors({});
     }
   }, [alert, isOpen]);
@@ -503,6 +506,7 @@ function EditAlertModal({
           target_time: targetTime,
           specific_dates: specificDates,
           flexibility_minutes: flexibilityMinutes,
+          allow_nearby_search: allowNearbySearch,
         };
         
         // Include coordinates if available (user may have changed the address)
@@ -536,6 +540,7 @@ function EditAlertModal({
           target_time: targetTime,
           specific_dates: specificDates,
           flexibility_minutes: flexibilityMinutes,
+          allow_nearby_search: allowNearbySearch,
         });
       }
 
@@ -721,6 +726,25 @@ function EditAlertModal({
                 ))}
               </select>
             </div>
+
+            {/* Allow Nearby Search */}
+            <div className="flex items-center space-x-3">
+              <input
+                type="checkbox"
+                id="allowNearbySearch"
+                checked={allowNearbySearch}
+                onChange={(e) => setAllowNearbySearch(e.target.checked)}
+                className="w-5 h-5 text-green-500 border-gray-300 rounded focus:ring-green-500 focus:ring-2"
+              />
+              <label htmlFor="allowNearbySearch" className="text-sm font-medium text-gray-700 cursor-pointer">
+                Buscar viajes a menos de 1 km de las direcciones especificadas
+              </label>
+            </div>
+            {allowNearbySearch && (
+              <p className="text-xs text-gray-500 -mt-2">
+                Si activas esta opción, también se buscarán y confirmarán automáticamente viajes cercanos (dentro de 1 km) además de los que coincidan exactamente con las direcciones.
+              </p>
+            )}
 
             <div className="flex justify-end space-x-4 pt-4">
               <button

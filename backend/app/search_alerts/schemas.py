@@ -14,6 +14,7 @@ class SearchAlertCreate(BaseModel):
     days_of_week: Optional[List[int]] = Field(default=None, description="Days of week (0-6, Monday-Sunday)", max_length=7)
     specific_dates: Optional[List[str]] = Field(default=None, description="Specific dates in YYYY-MM-DD format")
     flexibility_minutes: int = Field(default=30, ge=5, le=60, description="Flexibility in minutes")
+    allow_nearby_search: bool = Field(default=False, description="Allow searching trips within 1 km of origin/destination")
     
     @field_validator('target_time')
     @classmethod
@@ -73,6 +74,7 @@ class SearchAlertUpdate(BaseModel):
     days_of_week: Optional[List[int]] = Field(None, description="Days of week (0-6, Monday-Sunday)", max_length=7)
     specific_dates: Optional[List[str]] = Field(None, description="Specific dates in YYYY-MM-DD format")
     flexibility_minutes: Optional[int] = Field(None, ge=5, le=60, description="Flexibility in minutes")
+    allow_nearby_search: Optional[bool] = Field(None, description="Allow searching trips within 1 km of origin/destination")
     active: Optional[bool] = Field(None, description="Whether the alert is active")
     
     @field_validator('target_time')
@@ -135,6 +137,7 @@ class SearchAlertOut(BaseModel):
     days_of_week: Optional[List[int]]
     specific_dates: Optional[List[str]]
     flexibility_minutes: int
+    allow_nearby_search: bool
     active: bool
     created_at: str
 

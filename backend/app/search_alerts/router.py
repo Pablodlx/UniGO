@@ -6,7 +6,7 @@ from app.auth.models import User, SearchAlert
 from app.auth.router import get_current_user
 from app.db.session import get_db
 from app.search_alerts.schemas import SearchAlertCreate, SearchAlertOut, SearchAlertUpdate
-from app.rides.service import match_existing_trips_with_alert, cancel_auto_bookings_for_dates, match_trips_for_specific_dates
+from app.rides.service import match_existing_trips_with_alert, cancel_auto_bookings_for_dates, match_trips_for_specific_dates, cancel_all_auto_bookings_for_alert
 
 router = APIRouter(prefix="/search-alerts", tags=["Search Alerts"])
 
@@ -41,10 +41,15 @@ def create_search_alert(
         user_id=current_user.id,
         origin=alert_data.origin,
         destination=alert_data.destination,
+        origin_lat=alert_data.origin_lat,
+        origin_lng=alert_data.origin_lng,
+        destination_lat=alert_data.destination_lat,
+        destination_lng=alert_data.destination_lng,
         target_time=alert_data.target_time,
         days_of_week=days_of_week_to_save,
         specific_dates=specific_dates_parsed,
         flexibility_minutes=alert_data.flexibility_minutes,
+        allow_nearby_search=alert_data.allow_nearby_search,
         active=True,
     )
     
@@ -75,6 +80,7 @@ def create_search_alert(
         days_of_week=search_alert.days_of_week if search_alert.days_of_week else None,
         specific_dates=specific_dates_str,
         flexibility_minutes=search_alert.flexibility_minutes,
+        allow_nearby_search=search_alert.allow_nearby_search,
         active=search_alert.active,
         created_at=search_alert.created_at.isoformat(),
     )
@@ -105,6 +111,7 @@ def get_my_search_alerts(
             days_of_week=alert.days_of_week if alert.days_of_week else None,
             specific_dates=specific_dates_str,
             flexibility_minutes=alert.flexibility_minutes,
+            allow_nearby_search=alert.allow_nearby_search,
             active=alert.active,
             created_at=alert.created_at.isoformat(),
         ))
@@ -140,6 +147,7 @@ def get_search_alert(
         days_of_week=alert.days_of_week if alert.days_of_week else None,
         specific_dates=specific_dates_str,
         flexibility_minutes=alert.flexibility_minutes,
+        allow_nearby_search=alert.allow_nearby_search,
         active=alert.active,
         created_at=alert.created_at.isoformat(),
     )
@@ -173,15 +181,22 @@ def update_search_alert(
         alert.origin = alert_data.origin
     if alert_data.destination is not None:
         alert.destination = alert_data.destination
+    if alert_data.origin_lat is not None:
+        alert.origin_lat = alert_data.origin_lat
+    if alert_data.origin_lng is not None:
+        alert.origin_lng = alert_data.origin_lng
+    if alert_data.destination_lat is not None:
+        alert.destination_lat = alert_data.destination_lat
+    if alert_data.destination_lng is not None:
+        alert.destination_lng = alert_data.destination_lng
     if alert_data.target_time is not None:
         alert.target_time = alert_data.target_time
     if alert_data.flexibility_minutes is not None:
         alert.flexibility_minutes = alert_data.flexibility_minutes
+    if alert_data.allow_nearby_search is not None:
+        alert.allow_nearby_search = alert_data.allow_nearby_search
     if alert_data.active is not None:
         alert.active = alert_data.active
-    
-    # Note: origin_lat/lng and destination_lat/lng are optional in updates
-    # They're only used when creating new alerts or when explicitly provided
     
     # Handle specific_dates
     new_specific_dates = None
@@ -266,6 +281,7 @@ def update_search_alert(
         days_of_week=alert.days_of_week if alert.days_of_week else None,
         specific_dates=specific_dates_str,
         flexibility_minutes=alert.flexibility_minutes,
+        allow_nearby_search=alert.allow_nearby_search,
         active=alert.active,
         created_at=alert.created_at.isoformat(),
     )
@@ -277,7 +293,7 @@ def delete_search_alert(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Delete a search alert"""
+    """Delete a search alert and cancel all associated automatic bookings"""
     alert = db.query(SearchAlert).filter(
         SearchAlert.id == alert_id,
         SearchAlert.user_id == current_user.id
@@ -285,6 +301,15 @@ def delete_search_alert(
     
     if not alert:
         raise HTTPException(status_code=404, detail="Search alert not found")
+    
+    # Cancel all automatic bookings associated with this alert before deleting
+    try:
+        cancel_all_auto_bookings_for_alert(db, alert)
+    except Exception as e:
+        print(f"Error canceling bookings for deleted alert {alert.id}: {e}")
+        import traceback
+        traceback.print_exc()
+        # Continue with deletion even if cancellation fails
     
     db.delete(alert)
     db.commit()

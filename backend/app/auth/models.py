@@ -227,10 +227,15 @@ class SearchAlert(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     origin: Mapped[str] = mapped_column(String(100), nullable=False)
     destination: Mapped[str] = mapped_column(String(100), nullable=False)
+    origin_lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # Origin latitude
+    origin_lng: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # Origin longitude
+    destination_lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # Destination latitude
+    destination_lng: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # Destination longitude
     target_time: Mapped[str] = mapped_column(String(10), nullable=False)  # Time of day in "HH:MM" format
     days_of_week: Mapped[list[int]] = mapped_column(ARRAY(Integer), nullable=True)  # 0-6 (Monday-Sunday), nullable
     specific_dates: Mapped[list] = mapped_column(ARRAY(Date), nullable=True)  # Specific dates, nullable
     flexibility_minutes: Mapped[int] = mapped_column(Integer, default=30, nullable=False)  # Minutes before/after target_time
+    allow_nearby_search: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # Allow searching trips within 1 km
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
