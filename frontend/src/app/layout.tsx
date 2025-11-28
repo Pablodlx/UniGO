@@ -6,6 +6,7 @@ import NotificationPanel from "@/components/NotificationPanel";
 import NotificationHookWrapper from "@/components/NotificationHookWrapper";
 import PendingBookingsWrapper from "@/components/PendingBookingsWrapper";
 import SystemNotificationBanner from "@/components/SystemNotificationBanner";
+import ChatNotificationsBannerPolling from "@/components/ChatNotificationsBannerPolling";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -36,9 +37,10 @@ export default function RootLayout({
         <NotificationProvider>
           {children}
           <NotificationHookWrapper />
-          <NotificationPanel />
+          {/* <NotificationPanel /> */}
           <PendingBookingsWrapper />
           <SystemNotificationBanner />
+          <ChatNotificationsBannerPolling />
         </NotificationProvider>
       </body>
     </html>

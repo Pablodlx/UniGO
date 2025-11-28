@@ -7,7 +7,7 @@ from datetime import datetime, UTC
 from jose import JWTError, jwt
 
 from app.db.session import get_db
-from app.auth.models import User, Ride, Booking, BookingStatus, Message, TripGroupMessage
+from app.auth.models import User, Ride, Booking, BookingStatus, Message, TripGroupMessage, Notification
 from app.auth.router import get_current_user
 from app.chat.manager import manager
 from app.core.config import settings
@@ -194,12 +194,25 @@ async def send_message(
     )
     
     db.add(message)
-    db.commit()
-    db.refresh(message)
     
-    # Get sender and receiver names
+    # Create notification for the receiver
     sender = db.query(User).filter(User.id == message.sender_id).first()
     receiver = db.query(User).filter(User.id == message.receiver_id).first()
+    
+    # Store sender info in notification message for easier retrieval
+    sender_name = sender.full_name or sender.email if sender else "Usuario"
+    notification_message = f"{sender_name}: {message.message}"
+    
+    notification = Notification(
+        receiver_id=message.receiver_id,
+        type="new_message",
+        message=notification_message,
+        ride_id=message.trip_id
+    )
+    db.add(notification)
+    
+    db.commit()
+    db.refresh(message)
     
     # Get unread summary for the receiver to include in notification
     summary = None
@@ -413,6 +426,7 @@ def get_unread_summary(
             other_user_id = msg.sender_id
             sender = db.query(User).filter(User.id == other_user_id).first()
             other_user_name = sender.full_name or sender.email if sender else "Usuario"
+            other_user_avatar_url = sender.avatar_url if sender else None
             
             chats[chat_id] = {
                 "chat_id": chat_id,
@@ -421,6 +435,7 @@ def get_unread_summary(
                 "last_message_id": 0,
                 "trip_title": trip_title,
                 "other_user_name": other_user_name,
+                "other_user_avatar_url": other_user_avatar_url,
                 "is_group_chat": False
             }
 
@@ -484,6 +499,7 @@ def get_unread_summary(
             # Obtener nombre del último remitente
             last_sender = db.query(User).filter(User.id == last_group_msg.sender_id).first()
             other_user_name = last_sender.full_name or last_sender.email if last_sender else "Usuario"
+            other_user_avatar_url = last_sender.avatar_url if last_sender else None
             
             if trip_id not in chats:
                 chats[trip_id] = {
@@ -493,6 +509,7 @@ def get_unread_summary(
                     "last_message_id": 0,
                     "trip_title": trip_title,
                     "other_user_name": other_user_name,
+                    "other_user_avatar_url": other_user_avatar_url,
                     "is_group_chat": True
                 }
             

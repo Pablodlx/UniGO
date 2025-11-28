@@ -79,9 +79,13 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
         // Not JSON, use text as is
       }
       
-      const error = new Error(errorMessage || `HTTP ${r.status}`);
-      (error as any).status = r.status;
-      (error as any).statusText = r.statusText;
+      interface HttpError extends Error {
+        status: number;
+        statusText: string;
+      }
+      const error = new Error(errorMessage || `HTTP ${r.status}`) as HttpError;
+      error.status = r.status;
+      error.statusText = r.statusText;
       throw error;
     }
   
@@ -613,6 +617,7 @@ export interface ChatUnreadInfo {
   trip_title: string;
   other_user_name: string;
   other_user_id: number;
+  other_user_avatar_url?: string | null;
   unread_count: number;
   last_message_id: number;
   last_message_at?: string;
@@ -846,6 +851,33 @@ export interface SystemNotification {
 
 export async function getSystemNotifications(): Promise<SystemNotification[]> {
   return fetchJson<SystemNotification[]>(`${BASE}/notifications`, {
+    headers: { ...authHeaders() },
+  });
+}
+
+// --- Chat Notifications (Polling-based) ---
+export interface ChatNotification {
+  id: number;
+  type: string;
+  message: string;
+  ride_id: number | null;
+  trip_title: string;
+  sender_id: number | null;
+  sender_name: string;
+  sender_avatar_url: string | null;
+  created_at: string;
+  read_at: string | null;
+}
+
+export async function getUnreadChatNotifications(): Promise<ChatNotification[]> {
+  return fetchJson<ChatNotification[]>(`${BASE}/notifications?unread=true`, {
+    headers: { ...authHeaders() },
+  });
+}
+
+export async function markNotificationRead(notificationId: number): Promise<void> {
+  await fetchJson(`${BASE}/notifications/${notificationId}/mark-read`, {
+    method: "PATCH",
     headers: { ...authHeaders() },
   });
 }

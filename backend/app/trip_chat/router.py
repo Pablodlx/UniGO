@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from datetime import datetime
 
 from app.db.session import get_db
-from app.auth.models import User, Ride, Booking, BookingStatus, TripGroupMessage
+from app.auth.models import User, Ride, Booking, BookingStatus, TripGroupMessage, Notification
 from app.auth.router import get_current_user
 
 router = APIRouter(prefix="/trip-chat", tags=["trip-chat"])
@@ -99,6 +99,23 @@ def send_message(
     )
     
     db.add(message)
+    
+    # Create notifications for all participants (except sender)
+    sender_name = current_user.full_name or current_user.email
+    all_participants = [ride.driver_id] + passenger_ids
+    
+    for participant_id in all_participants:
+        if participant_id != current_user.id:  # Don't notify yourself
+            # Store sender info in notification message
+            notification_message = f"{sender_name}: {message_data.message}"
+            notification = Notification(
+                receiver_id=participant_id,
+                type="new_group_message",
+                message=notification_message,
+                ride_id=message_data.trip_id
+            )
+            db.add(notification)
+    
     db.commit()
     db.refresh(message)
     
