@@ -206,6 +206,8 @@ export interface UserProfile {
   average_rating: number | null;
   rating_count: number;
   average_rating_display: string;
+  completed_driver_trips: number;
+  completed_passenger_trips: number;
 }
 
 export async function getUserProfile(userId: number): Promise<UserProfile> {
@@ -302,6 +304,8 @@ export interface Ride {
   driver_university?: string;
   driver_avatar_url?: string | null;
   driver_average_rating?: number;
+  driver_completed_trips?: number; // Number of completed trips as driver
+  driver_completed_passenger_trips?: number; // Number of completed trips as passenger
   departure_city: string;
   destination_city: string;
   departure_lat?: number | null;

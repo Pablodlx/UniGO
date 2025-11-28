@@ -60,6 +60,8 @@ class RideOut(RideBase):
     is_active: bool
     created_at: datetime
     driver_average_rating: Optional[float] = None
+    driver_completed_trips: Optional[int] = 0  # Number of completed trips as driver
+    driver_completed_passenger_trips: Optional[int] = 0  # Number of completed trips as passenger
     reserved_by_user_id: Optional[int] = None  # ID of the first passenger with confirmed booking
     passengers: List[PassengerInfo] = []  # List of all confirmed passengers
     passengers_ids: List[int] = []  # List of all confirmed passenger IDs

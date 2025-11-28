@@ -43,3 +43,5 @@ class ProfileOut(ProfileBase):
     average_rating: float | None = None
     rating_count: int = 0
     average_rating_display: str = "No hay valoraciones"  # Display text for average rating
+    completed_driver_trips: int = 0
+    completed_passenger_trips: int = 0

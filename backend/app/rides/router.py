@@ -133,8 +133,11 @@ def get_my_bookings(
                         print(f"Warning: Could not get rating for driver {driver.id}: {e}")
                         driver_average_rating = None
                     
-                    from app.rides.service import calculate_arrival_time_string, _get_ride_passengers
+                    from app.rides.service import calculate_arrival_time_string, _get_ride_passengers, _get_driver_trip_stats
                     arrival_time = calculate_arrival_time_string(ride)
+                    
+                    # Calculate driver's completed trips statistics
+                    driver_completed_trips, driver_completed_passenger_trips = _get_driver_trip_stats(db, driver.id)
                     
                     # Get first confirmed booking's passenger_id for reserved_by_user_id
                     reserved_by_user_id = None
@@ -175,6 +178,8 @@ def get_my_bookings(
                         is_active=ride.is_active,
                         created_at=ride.created_at,
                         driver_average_rating=driver_average_rating,
+                        driver_completed_trips=driver_completed_trips,
+                        driver_completed_passenger_trips=driver_completed_passenger_trips,
                         reserved_by_user_id=reserved_by_user_id,
                         passengers=passengers_info,
                         passengers_ids=passengers_ids,

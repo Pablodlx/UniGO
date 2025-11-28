@@ -148,6 +148,8 @@ interface ProfileData {
   avatar_url: string | null;
   average_rating: number | null;
   rating_count: number;
+  completed_driver_trips: number;
+  completed_passenger_trips: number;
 }
 
 export default function ProfilePage() {
@@ -657,6 +659,25 @@ export default function ProfilePage() {
                   ) : (
                     <div className="text-sm text-gray-500">No hay valoraciones aún</div>
                   )}
+                </div>
+
+                {/* Trip Statistics */}
+                <div className="flex gap-6 mt-4 text-gray-800 justify-center">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🚗</span>
+                    <div>
+                      <p className="text-sm font-semibold">Conductor</p>
+                      <p className="text-sm">{profile?.completed_driver_trips || 0} viajes</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">👤</span>
+                    <div>
+                      <p className="text-sm font-semibold">Pasajero</p>
+                      <p className="text-sm">{profile?.completed_passenger_trips || 0} viajes</p>
+                    </div>
+                  </div>
                 </div>
               </div>
 

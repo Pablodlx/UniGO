@@ -162,6 +162,13 @@ export default function RideCard({ ride, onClick }: RideCardProps) {
             {ride.driver_university && (
               <div className="text-xs text-gray-500">{ride.driver_university}</div>
             )}
+            {/* Driver Trip Statistics */}
+            {ride.driver_completed_trips !== undefined && (
+              <div className="flex items-center gap-1 text-gray-600 text-sm mt-1">
+                <span>🚗</span>
+                <span>{ride.driver_completed_trips || 0} viajes</span>
+              </div>
+            )}
           </div>
         </div>
       </div>

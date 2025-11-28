@@ -15,6 +15,8 @@ REQUIRED = ("full_name", "university", "degree", "course")
 
 def get_profile(db: Session, user: User) -> ProfileOut:
     from app.profile.schemas import HomeAddress
+    from app.auth.models import Ride, Booking, BookingStatus
+    from datetime import datetime, timezone
     
     # Calculate average rating and rating count
     average_rating = ratings_service.get_user_average_rating(db, user.id)
@@ -22,6 +24,25 @@ def get_profile(db: Session, user: User) -> ProfileOut:
     
     # Set display text for average rating
     average_rating_display = "No hay valoraciones" if average_rating is None else str(average_rating)
+    
+    # Calculate completed driver trips
+    # Viaje completado como conductor = ride.driver_id == user.id AND ride.is_active == True 
+    # AND departure_date + departure_time < now
+    now = datetime.now(timezone.utc)
+    completed_driver_trips = db.query(Ride).filter(
+        Ride.driver_id == user.id,
+        Ride.is_active == True,
+        Ride.departure_date < now
+    ).count()
+    
+    # Calculate completed passenger trips
+    # Viaje completado como pasajero = booking.passenger_id == user.id 
+    # AND booking.status == "confirmed" AND ride.departure_date < now
+    completed_passenger_trips = db.query(Booking).join(Ride).filter(
+        Booking.passenger_id == user.id,
+        Booking.status == BookingStatus.confirmed,
+        Ride.departure_date < now
+    ).count()
     
     # Build home address if available
     home_address = None
@@ -44,6 +65,8 @@ def get_profile(db: Session, user: User) -> ProfileOut:
         average_rating=average_rating,
         rating_count=rating_count,
         average_rating_display=average_rating_display,
+        completed_driver_trips=completed_driver_trips,
+        completed_passenger_trips=completed_passenger_trips,
     )
 
 

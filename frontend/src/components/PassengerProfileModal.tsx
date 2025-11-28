@@ -200,6 +200,18 @@ export default function PassengerProfileModal({
                   {(!profile.average_rating || profile.average_rating === 0) && (
                     <p className="text-gray-500 mt-2">Sin valoraciones aún</p>
                   )}
+                  
+                  {/* Trip Statistics */}
+                  <div className="flex gap-8 mt-3 text-gray-700 text-sm">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">🚗</span>
+                      <span>{profile.completed_driver_trips || 0} viajes como conductor</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">👤</span>
+                      <span>{profile.completed_passenger_trips || 0} viajes como pasajero</span>
+                    </div>
+                  </div>
                 </div>
               </div>
 

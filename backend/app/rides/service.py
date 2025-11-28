@@ -16,6 +16,26 @@ except ImportError:
     ratings_service = None
 
 
+def _get_driver_trip_stats(db: Session, driver_id: int) -> tuple[int, int]:
+    """Helper function to calculate driver's completed trip statistics"""
+    from datetime import datetime, timezone
+    
+    now = datetime.now(timezone.utc)
+    completed_driver_trips = db.query(Ride).filter(
+        Ride.driver_id == driver_id,
+        Ride.is_active == True,
+        Ride.departure_date < now
+    ).count()
+    
+    completed_passenger_trips = db.query(Booking).join(Ride).filter(
+        Booking.passenger_id == driver_id,
+        Booking.status == BookingStatus.confirmed,
+        Ride.departure_date < now
+    ).count()
+    
+    return completed_driver_trips, completed_passenger_trips
+
+
 def _get_ride_passengers(db: Session, ride_id: int) -> tuple[List[PassengerInfo], List[int]]:
     """Helper function to get all confirmed passengers for a ride"""
     bookings = db.query(Booking).filter(
@@ -215,6 +235,8 @@ def create_ride(db: Session, ride_data: RideCreate, driver_id: int) -> RideOut:
 
 def get_ride_with_driver_info(db: Session, ride_id: int) -> RideOut:
     """Get ride with driver information"""
+    from datetime import datetime, timezone
+    
     ride = db.query(Ride).filter(Ride.id == ride_id).first()
     if not ride:
         return None
@@ -230,6 +252,9 @@ def get_ride_with_driver_info(db: Session, ride_id: int) -> RideOut:
             driver_average_rating = ratings_service.get_user_average_rating(db, driver.id)
         except Exception:
             driver_average_rating = None
+    
+    # Calculate driver's completed trips statistics
+    driver_completed_trips, driver_completed_passenger_trips = _get_driver_trip_stats(db, driver.id)
     
     # Get first confirmed booking's passenger_id for reserved_by_user_id
     reserved_by_user_id = None
@@ -269,6 +294,8 @@ def get_ride_with_driver_info(db: Session, ride_id: int) -> RideOut:
         is_active=ride.is_active,
         created_at=ride.created_at,
         driver_average_rating=driver_average_rating,
+        driver_completed_trips=driver_completed_trips,
+        driver_completed_passenger_trips=driver_completed_passenger_trips,
         reserved_by_user_id=reserved_by_user_id,
         passengers=passengers_info,
         passengers_ids=passengers_ids,
@@ -325,6 +352,9 @@ def search_rides(db: Session, search_params: RideSearch, exclude_booked_by_user_
             except Exception:
                 driver_average_rating = None
         
+        # Calculate driver's completed trips statistics
+        driver_completed_trips, driver_completed_passenger_trips = _get_driver_trip_stats(db, driver.id)
+        
         # Get first confirmed booking's passenger_id for reserved_by_user_id
         reserved_by_user_id = None
         first_booking = db.query(Booking).filter(
@@ -363,6 +393,8 @@ def search_rides(db: Session, search_params: RideSearch, exclude_booked_by_user_
             is_active=ride.is_active,
             created_at=ride.created_at,
             driver_average_rating=driver_average_rating,
+            driver_completed_trips=driver_completed_trips,
+            driver_completed_passenger_trips=driver_completed_passenger_trips,
             reserved_by_user_id=reserved_by_user_id,
             passengers=passengers_info,
             passengers_ids=passengers_ids,
@@ -406,6 +438,9 @@ def get_user_rides(db: Session, user_id: int) -> List[RideOut]:
                             print(f"Warning: Could not get rating for driver {driver.id}: {e}")
                             driver_average_rating = None
                     
+                    # Calculate driver's completed trips statistics
+                    driver_completed_trips, driver_completed_passenger_trips = _get_driver_trip_stats(db, driver.id)
+                    
                     arrival_time = calculate_arrival_time_string(ride)
                     
                     # Get first confirmed booking's passenger_id for reserved_by_user_id
@@ -444,6 +479,8 @@ def get_user_rides(db: Session, user_id: int) -> List[RideOut]:
                         is_active=ride.is_active,
                         created_at=ride.created_at,
                         driver_average_rating=driver_average_rating,
+                        driver_completed_trips=driver_completed_trips,
+                        driver_completed_passenger_trips=driver_completed_passenger_trips,
                         reserved_by_user_id=reserved_by_user_id,
                         passengers=passengers_info,
                         passengers_ids=passengers_ids,
