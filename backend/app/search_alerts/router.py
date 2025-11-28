@@ -6,7 +6,7 @@ from app.auth.models import User, SearchAlert
 from app.auth.router import get_current_user
 from app.db.session import get_db
 from app.search_alerts.schemas import SearchAlertCreate, SearchAlertOut, SearchAlertUpdate
-from app.rides.service import match_existing_trips_with_alert
+from app.rides.service import match_existing_trips_with_alert, cancel_auto_bookings_for_dates, match_trips_for_specific_dates
 
 router = APIRouter(prefix="/search-alerts", tags=["Search Alerts"])
 
@@ -161,6 +161,13 @@ def update_search_alert(
     if not alert:
         raise HTTPException(status_code=404, detail="Search alert not found")
     
+    # Save old dates before updating (for comparison)
+    old_specific_dates = set(alert.specific_dates) if alert.specific_dates else set()
+    old_origin = alert.origin
+    old_destination = alert.destination
+    old_target_time = alert.target_time
+    old_flexibility_minutes = alert.flexibility_minutes
+    
     # Update fields if provided
     if alert_data.origin is not None:
         alert.origin = alert_data.origin
@@ -177,11 +184,13 @@ def update_search_alert(
     # They're only used when creating new alerts or when explicitly provided
     
     # Handle specific_dates
+    new_specific_dates = None
     if alert_data.specific_dates is not None:
         if len(alert_data.specific_dates) > 0:
             from datetime import date as date_type
             try:
-                alert.specific_dates = [date_type.fromisoformat(d) for d in alert_data.specific_dates]
+                new_specific_dates = [date_type.fromisoformat(d) for d in alert_data.specific_dates]
+                alert.specific_dates = new_specific_dates
                 # If specific_dates is provided, clear days_of_week
                 alert.days_of_week = None
             except ValueError as e:
@@ -191,6 +200,7 @@ def update_search_alert(
                 )
         else:
             alert.specific_dates = None
+            new_specific_dates = []
     
     # Handle days_of_week (only if specific_dates is not being set)
     if alert_data.days_of_week is not None and (alert_data.specific_dates is None or len(alert_data.specific_dates) == 0):
@@ -199,11 +209,48 @@ def update_search_alert(
             # If days_of_week is provided and specific_dates is empty, clear specific_dates
             if alert_data.specific_dates is not None:
                 alert.specific_dates = None
+                new_specific_dates = []
         else:
             alert.days_of_week = None
     
+    # Determine new dates set (for comparison)
+    new_specific_dates_set = set(new_specific_dates) if new_specific_dates is not None else set()
+    
+    # Compare old and new dates to find removed and added dates
+    removed_dates = list(old_specific_dates - new_specific_dates_set)
+    added_dates = list(new_specific_dates_set - old_specific_dates)
+    
+    # If dates were removed, cancel bookings for those dates
+    # Use old alert values since bookings were created with those criteria
+    if removed_dates and len(removed_dates) > 0:
+        try:
+            cancel_auto_bookings_for_dates(
+                db=db,
+                alert=alert,
+                removed_dates=removed_dates,
+                alert_origin=old_origin,
+                alert_destination=old_destination,
+                alert_target_time=old_target_time,
+                alert_flexibility_minutes=old_flexibility_minutes,
+            )
+        except Exception as e:
+            print(f"Error canceling bookings for removed dates: {e}")
+            import traceback
+            traceback.print_exc()
+            # Continue with update even if cancellation fails
+    
     db.commit()
     db.refresh(alert)
+    
+    # If dates were added, match existing trips for those new dates only
+    if added_dates and len(added_dates) > 0:
+        try:
+            match_trips_for_specific_dates(db, alert, added_dates)
+        except Exception as e:
+            print(f"Error matching trips for added dates: {e}")
+            import traceback
+            traceback.print_exc()
+            # Continue even if matching fails
     
     # Convert specific_dates back to strings for response
     specific_dates_str = None

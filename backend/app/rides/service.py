@@ -773,3 +773,241 @@ def match_existing_trips_with_alert(db: Session, alert: SearchAlert) -> None:
             import traceback
             traceback.print_exc()
             continue
+
+
+def match_trips_for_specific_dates(
+    db: Session,
+    alert: SearchAlert,
+    target_dates: list,
+) -> None:
+    """
+    Match existing trips with an alert for specific dates only.
+    This is used when dates are added to an existing alert.
+    
+    Args:
+        db: Database session
+        alert: The SearchAlert object
+        target_dates: List of date objects to match
+    """
+    if not target_dates or len(target_dates) == 0:
+        return
+    
+    from datetime import datetime, timezone, date as date_type
+    
+    # Parse alert target_time
+    try:
+        alert_time_parts = alert.target_time.split(":")
+        alert_hour = int(alert_time_parts[0])
+        alert_minute = int(alert_time_parts[1])
+        alert_time_minutes = alert_hour * 60 + alert_minute
+    except (ValueError, IndexError):
+        print(f"Invalid alert target_time format: {alert.target_time}")
+        return
+    
+    # Get current date to filter out past trips
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Find all active trips that match destination
+    all_trips = db.query(Ride).filter(
+        Ride.is_active == True,
+        Ride.available_seats > 0,
+        Ride.departure_date >= today_start,
+        Ride.destination_city.ilike(f"%{alert.destination}%"),
+    ).all()
+    
+    matching_trips = []
+    for trip in all_trips:
+        # Skip if origin doesn't match
+        if alert.origin and not trip.departure_city.lower() in alert.origin.lower() and not alert.origin.lower() in trip.departure_city.lower():
+            continue
+        
+        # Check if trip date is in target_dates
+        trip_date = trip.departure_date.date()
+        if trip_date not in target_dates:
+            continue
+        
+        # Parse trip departure_time
+        try:
+            trip_time_parts = trip.departure_time.split(":")
+            trip_hour = int(trip_time_parts[0])
+            trip_minute = int(trip_time_parts[1])
+            trip_time_minutes = trip_hour * 60 + trip_minute
+        except (ValueError, IndexError):
+            continue
+        
+        # Check if trip time is within flexibility range
+        time_diff = abs(trip_time_minutes - alert_time_minutes)
+        if time_diff > alert.flexibility_minutes:
+            continue
+        
+        # Trip matches all criteria
+        matching_trips.append(trip)
+    
+    print(f"Found {len(matching_trips)} existing trips matching alert {alert.id} for added dates")
+    
+    # Create bookings and notifications for matching trips
+    for trip in matching_trips:
+        # Skip if user is the driver
+        if alert.user_id == trip.driver_id:
+            continue
+        
+        # Check if user already has a booking for this ride
+        existing_booking = db.query(Booking).filter(
+            Booking.ride_id == trip.id,
+            Booking.passenger_id == alert.user_id,
+            Booking.status.in_([BookingStatus.pending, BookingStatus.confirmed])
+        ).first()
+        
+        if existing_booking:
+            continue
+        
+        # Check if there are available seats
+        if trip.available_seats <= 0:
+            continue
+        
+        try:
+            # Create automatic booking in pending status
+            auto_booking = Booking(
+                ride_id=trip.id,
+                passenger_id=alert.user_id,
+                status=BookingStatus.pending,
+                seats=1,
+            )
+            db.add(auto_booking)
+            
+            # Create notification
+            notification = create_notification(
+                db=db,
+                receiver_id=alert.user_id,
+                type="auto_trip_match",
+                message="¡Hemos encontrado un viaje para ti! Se ha encontrado un viaje que coincide con tu búsqueda automática.",
+                ride_id=trip.id,
+            )
+            
+            db.commit()
+            print(f"Created auto-booking and notification for user {alert.user_id} on existing ride {trip.id} for added date")
+            
+        except Exception as e:
+            db.rollback()
+            print(f"Error creating auto-booking for user {alert.user_id} on existing ride {trip.id}: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
+
+
+def cancel_auto_bookings_for_dates(
+    db: Session,
+    alert: SearchAlert,
+    removed_dates: list,
+    alert_origin: str,
+    alert_destination: str,
+    alert_target_time: str,
+    alert_flexibility_minutes: int,
+) -> None:
+    """
+    Cancel automatic bookings for specific dates that were removed from an alert.
+    
+    Args:
+        db: Database session
+        alert: The SearchAlert object
+        removed_dates: List of date objects that were removed from the alert
+        alert_origin: Origin of the alert
+        alert_destination: Destination of the alert
+        alert_target_time: Target time of the alert (HH:MM format)
+        alert_flexibility_minutes: Flexibility in minutes
+    """
+    if not removed_dates or len(removed_dates) == 0:
+        return
+    
+    from datetime import date as date_type
+    
+    # Parse alert target_time
+    try:
+        alert_time_parts = alert_target_time.split(":")
+        alert_hour = int(alert_time_parts[0])
+        alert_minute = int(alert_time_parts[1])
+        alert_time_minutes = alert_hour * 60 + alert_minute
+    except (ValueError, IndexError):
+        print(f"Invalid alert target_time format: {alert_target_time}")
+        return
+    
+    # Find all bookings for the alert user that are pending or confirmed
+    user_bookings = db.query(Booking).join(Ride).filter(
+        Booking.passenger_id == alert.user_id,
+        Booking.status.in_([BookingStatus.pending, BookingStatus.confirmed]),
+        Ride.is_active == True,
+    ).all()
+    
+    canceled_count = 0
+    for booking in user_bookings:
+        ride = booking.ride
+        
+        # Check if ride date is in removed dates
+        ride_date = ride.departure_date.date()
+        if ride_date not in removed_dates:
+            continue
+        
+        # Check if ride matches alert criteria (destination, origin, time)
+        # Destination match
+        if not ride.destination_city.lower() in alert_destination.lower() and not alert_destination.lower() in ride.destination_city.lower():
+            continue
+        
+        # Origin match (optional)
+        if alert_origin and not ride.departure_city.lower() in alert_origin.lower() and not alert_origin.lower() in ride.departure_city.lower():
+            continue
+        
+        # Time match (within flexibility)
+        try:
+            ride_time_parts = ride.departure_time.split(":")
+            ride_hour = int(ride_time_parts[0])
+            ride_minute = int(ride_time_parts[1])
+            ride_time_minutes = ride_hour * 60 + ride_minute
+        except (ValueError, IndexError):
+            continue
+        
+        time_diff = abs(ride_time_minutes - alert_time_minutes)
+        if time_diff > alert_flexibility_minutes:
+            continue
+        
+        # This booking matches the removed date criteria - cancel it (so it appears in registro)
+        try:
+            was_confirmed = booking.status == BookingStatus.confirmed
+            
+            # Cancel the booking (so it appears in registro as cancelled)
+            booking.status = BookingStatus.canceled
+            
+            # If it was confirmed, restore seats and notify driver
+            if was_confirmed:
+                ride.available_seats += booking.seats
+                
+                # Get passenger user for notification
+                passenger = db.query(User).filter(User.id == alert.user_id).first()
+                passenger_name = passenger.full_name if passenger and passenger.full_name else (passenger.email if passenger else "Un pasajero")
+                
+                # Create notification for the driver (same as when passenger cancels)
+                notification = create_notification(
+                    db=db,
+                    receiver_id=ride.driver_id,
+                    type="booking_cancelled",
+                    message=(
+                        f"El pasajero {passenger_name} "
+                        f"ha cancelado su reserva para el viaje "
+                        f"{ride.departure_city} → {ride.destination_city}."
+                    ),
+                    ride_id=ride.id,
+                )
+                db.add(notification)
+            
+            db.commit()
+            canceled_count += 1
+            print(f"Canceled auto-booking {booking.id} for removed date {ride_date}")
+            
+        except Exception as e:
+            db.rollback()
+            print(f"Error canceling booking {booking.id}: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
+    
+    print(f"Canceled {canceled_count} auto-bookings for removed dates from alert {alert.id}")

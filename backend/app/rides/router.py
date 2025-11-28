@@ -219,12 +219,9 @@ def get_ride_history(
         Ride.driver_id == current_user.id
     ).all()
     
-    # Get all bookings where user was passenger
+    # Get all bookings where user was passenger (include canceled for registro)
     all_bookings = db.query(Booking).filter(
-        and_(
-            Booking.passenger_id == current_user.id,
-            Booking.status != BookingStatus.canceled
-        )
+        Booking.passenger_id == current_user.id
     ).all()
     
     result = []
@@ -364,10 +361,13 @@ def get_ride_history(
             
             # Include if the ride has passed (based on arrival time) OR if it's canceled OR if booking is rejected
             is_rejected = booking.status == BookingStatus.rejected
-            if check_datetime < now or not ride.is_active or is_rejected:
+            is_canceled = booking.status == BookingStatus.canceled
+            if check_datetime < now or not ride.is_active or is_rejected or is_canceled:
                 driver = db.query(User).filter(User.id == ride.driver_id).first()
-                # Determine status: cancelled if not active, completed if past and active, rejected if booking is rejected
-                if is_rejected:
+                # Determine status: cancelled if booking is canceled or ride not active, rejected if booking is rejected, completed if past and active
+                if is_canceled:
+                    status = "cancelled"
+                elif is_rejected:
                     status = "rejected"
                 elif not ride.is_active:
                     status = "cancelled"
