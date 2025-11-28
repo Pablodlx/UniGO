@@ -4,7 +4,7 @@ import math
 
 import pytz
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, not_
 
 from app.auth.models import Ride, User, Booking, BookingStatus, SearchAlert
 from app.rides.schemas import RideCreate, RideOut, RideSearch, PassengerInfo
@@ -754,6 +754,18 @@ def match_search_alerts_with_trip(db: Session, trip: Ride) -> None:
             print(f"User {alert.user_id} already has a booking for ride {trip.id}")
             continue
         
+        # IMPORTANT: Check if user already has a booking for this DATE (only one booking per day)
+        existing_booking_for_date = db.query(Booking).join(Ride).filter(
+            Booking.passenger_id == alert.user_id,
+            Booking.status.in_([BookingStatus.pending, BookingStatus.confirmed]),
+            Ride.departure_date.date() == trip_date
+        ).first()
+        
+        if existing_booking_for_date:
+            # User already has a booking for this date, skip this trip
+            print(f"User {alert.user_id} already has a booking for date {trip_date}, skipping trip {trip.id}")
+            continue
+        
         # Check if there are available seats
         if trip.available_seats <= 0:
             print(f"No available seats in ride {trip.id}")
@@ -787,6 +799,59 @@ def match_search_alerts_with_trip(db: Session, trip: Ride) -> None:
             import traceback
             traceback.print_exc()
             continue
+
+
+def _get_trip_score(db: Session, trip: Ride, alert: SearchAlert) -> tuple[float, float]:
+    """
+    Calculate a score for a trip to determine if it's better than another.
+    Returns (rating_score, distance_score) where:
+    - rating_score: driver's average rating (higher is better, None = 0)
+    - distance_score: distance from alert origin to trip origin (lower is better, None = infinity)
+    """
+    # Get driver rating
+    rating_score = 0.0
+    if ratings_service:
+        try:
+            driver_rating = ratings_service.get_user_average_rating(db, trip.driver_id)
+            rating_score = driver_rating if driver_rating is not None else 0.0
+        except Exception:
+            rating_score = 0.0
+    
+    # Get distance (if coordinates available)
+    distance_score = float('inf')
+    if alert.origin_lat is not None and alert.origin_lng is not None and trip.departure_lat is not None and trip.departure_lng is not None:
+        distance_score = haversine(
+            alert.origin_lat, alert.origin_lng,
+            trip.departure_lat, trip.departure_lng
+        )
+    
+    return (rating_score, distance_score)
+
+
+def _select_best_trip(db: Session, trips: List[Ride], alert: SearchAlert) -> Optional[Ride]:
+    """
+    Select the best trip from a list based on:
+    1. Higher driver rating (if available)
+    2. Closer distance (if same rating or no rating)
+    
+    Returns the best trip or None if list is empty.
+    """
+    if not trips or len(trips) == 0:
+        return None
+    
+    if len(trips) == 1:
+        return trips[0]
+    
+    # Calculate scores for all trips
+    trip_scores = []
+    for trip in trips:
+        rating_score, distance_score = _get_trip_score(db, trip, alert)
+        trip_scores.append((trip, rating_score, distance_score))
+    
+    # Sort by rating (descending), then by distance (ascending)
+    trip_scores.sort(key=lambda x: (-x[1], x[2]))
+    
+    return trip_scores[0][0]
 
 
 def match_existing_trips_with_alert(db: Session, alert: SearchAlert) -> None:
@@ -908,8 +973,24 @@ def match_existing_trips_with_alert(db: Session, alert: SearchAlert) -> None:
     
     print(f"Found {len(matching_trips)} existing trips matching alert {alert.id} for destination '{alert.destination}'")
     
-    # Create bookings and notifications for matching trips
+    # Group trips by date and select only the best trip per date
+    from collections import defaultdict
+    trips_by_date = defaultdict(list)
     for trip in matching_trips:
+        trip_date = trip.departure_date.date()
+        trips_by_date[trip_date].append(trip)
+    
+    # Select best trip for each date
+    best_trips = []
+    for trip_date, date_trips in trips_by_date.items():
+        best_trip = _select_best_trip(db, date_trips, alert)
+        if best_trip:
+            best_trips.append(best_trip)
+    
+    print(f"Selected {len(best_trips)} best trips (one per date) for alert {alert.id}")
+    
+    # Create bookings and notifications for best trips only
+    for trip in best_trips:
         # Skip if user is the driver (can't book their own ride)
         if alert.user_id == trip.driver_id:
             continue
@@ -1067,8 +1148,24 @@ def match_trips_for_specific_dates(
     
     print(f"Found {len(matching_trips)} existing trips matching alert {alert.id} for added dates")
     
-    # Create bookings and notifications for matching trips
+    # Group trips by date and select only the best trip per date
+    from collections import defaultdict
+    trips_by_date = defaultdict(list)
     for trip in matching_trips:
+        trip_date = trip.departure_date.date()
+        trips_by_date[trip_date].append(trip)
+    
+    # Select best trip for each date
+    best_trips = []
+    for trip_date, date_trips in trips_by_date.items():
+        best_trip = _select_best_trip(db, date_trips, alert)
+        if best_trip:
+            best_trips.append(best_trip)
+    
+    print(f"Selected {len(best_trips)} best trips (one per date) for alert {alert.id} for added dates")
+    
+    # Create bookings and notifications for best trips only
+    for trip in best_trips:
         # Skip if user is the driver
         if alert.user_id == trip.driver_id:
             continue
@@ -1384,3 +1481,197 @@ def cancel_all_auto_bookings_for_alert(db: Session, alert: SearchAlert) -> None:
             continue
     
     print(f"Rejected {canceled_count} auto-bookings for deleted alert {alert.id}")
+
+
+def retry_search_for_rejected_auto_booking(db: Session, passenger_id: int, rejected_ride_id: int) -> None:
+    """
+    When an automatic booking is rejected, re-search for matching trips for the passenger's active alerts.
+    This allows the system to find other drivers who publish matching trips.
+    
+    Args:
+        db: Database session
+        passenger_id: ID of the passenger whose booking was rejected
+        rejected_ride_id: ID of the ride that was rejected (to exclude it from new searches)
+    """
+    # Find all active search alerts for this passenger
+    active_alerts = db.query(SearchAlert).filter(
+        SearchAlert.user_id == passenger_id,
+        SearchAlert.active == True,
+    ).all()
+    
+    if not active_alerts or len(active_alerts) == 0:
+        print(f"No active alerts found for passenger {passenger_id}")
+        return
+    
+    print(f"Found {len(active_alerts)} active alerts for passenger {passenger_id}, re-searching for matching trips...")
+    
+    # Get all bookings for this passenger to exclude rides they already have bookings for
+    existing_bookings = db.query(Booking).filter(
+        Booking.passenger_id == passenger_id,
+        Booking.status.in_([BookingStatus.pending, BookingStatus.confirmed])
+    ).all()
+    excluded_ride_ids = {b.ride_id for b in existing_bookings}
+    excluded_ride_ids.add(rejected_ride_id)  # Also exclude the ride that was just rejected
+    
+    # Get current date to filter out past trips
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # For each alert, find matching trips (excluding already booked rides and the rejected ride)
+    for alert in active_alerts:
+        # Parse alert target_time
+        try:
+            alert_time_parts = alert.target_time.split(":")
+            alert_hour = int(alert_time_parts[0])
+            alert_minute = int(alert_time_parts[1])
+            alert_time_minutes = alert_hour * 60 + alert_minute
+        except (ValueError, IndexError):
+            print(f"Invalid alert target_time format: {alert.target_time}")
+            continue
+        
+        # Find all active trips that match the alert criteria
+        # Exclude already booked rides and the rejected ride
+        query = db.query(Ride).filter(
+            Ride.is_active == True,
+            Ride.available_seats > 0,
+            Ride.departure_date >= today_start,
+        )
+        
+        if excluded_ride_ids:
+            query = query.filter(not_(Ride.id.in_(excluded_ride_ids)))
+        
+        all_trips = query.all()
+        
+        # Filter trips that match the alert criteria
+        matching_trips = []
+        for trip in all_trips:
+            # Check destination match
+            destination_matches = False
+            if trip.destination_city and alert.destination:
+                destination_matches = trip.destination_city.lower() in alert.destination.lower() or alert.destination.lower() in trip.destination_city.lower()
+            
+            if not destination_matches and alert.allow_nearby_search and alert.destination_lat is not None and alert.destination_lng is not None and trip.destination_lat is not None and trip.destination_lng is not None:
+                dest_dist = haversine(
+                    alert.destination_lat,
+                    alert.destination_lng,
+                    trip.destination_lat,
+                    trip.destination_lng
+                )
+                destination_matches = dest_dist <= 1.0
+            
+            if not destination_matches:
+                continue
+            
+            # Check origin match
+            origin_matches = True
+            if alert.origin:
+                origin_matches = False
+                if trip.departure_city:
+                    origin_matches = trip.departure_city.lower() in alert.origin.lower() or alert.origin.lower() in trip.departure_city.lower()
+                
+                if not origin_matches and alert.allow_nearby_search and alert.origin_lat is not None and alert.origin_lng is not None and trip.departure_lat is not None and trip.departure_lng is not None:
+                    origin_dist = haversine(
+                        alert.origin_lat,
+                        alert.origin_lng,
+                        trip.departure_lat,
+                        trip.departure_lng
+                    )
+                    origin_matches = origin_dist <= 1.0
+            
+            if not origin_matches:
+                continue
+            
+            # Check date matching
+            trip_date = trip.departure_date.date()
+            trip_day_of_week = trip.departure_date.weekday()
+            date_matches = False
+            
+            if alert.specific_dates and len(alert.specific_dates) > 0:
+                date_matches = trip_date in alert.specific_dates
+            elif alert.days_of_week and len(alert.days_of_week) > 0:
+                date_matches = trip_day_of_week in alert.days_of_week
+            else:
+                continue
+            
+            if not date_matches:
+                continue
+            
+            # Check time match
+            try:
+                trip_time_parts = trip.departure_time.split(":")
+                trip_hour = int(trip_time_parts[0])
+                trip_minute = int(trip_time_parts[1])
+                trip_time_minutes = trip_hour * 60 + trip_minute
+            except (ValueError, IndexError):
+                continue
+            
+            time_diff = abs(trip_time_minutes - alert_time_minutes)
+            if time_diff > alert.flexibility_minutes:
+                continue
+            
+            # Skip if user is the driver
+            if alert.user_id == trip.driver_id:
+                continue
+            
+            # Trip matches all criteria
+            matching_trips.append(trip)
+        
+        # Group trips by date and select only the best trip per date
+        from collections import defaultdict
+        trips_by_date = defaultdict(list)
+        for trip in matching_trips:
+            trip_date = trip.departure_date.date()
+            trips_by_date[trip_date].append(trip)
+        
+        # Select best trip for each date
+        best_trips = []
+        for trip_date, date_trips in trips_by_date.items():
+            best_trip = _select_best_trip(db, date_trips, alert)
+            if best_trip:
+                best_trips.append(best_trip)
+        
+        print(f"Selected {len(best_trips)} best trips (one per date) for alert {alert.id} after rejection")
+        
+        # Create bookings and notifications for best trips only
+        for trip in best_trips:
+            # Check if user already has a booking for this ride (double check)
+            existing_booking = db.query(Booking).filter(
+                Booking.ride_id == trip.id,
+                Booking.passenger_id == alert.user_id,
+                Booking.status.in_([BookingStatus.pending, BookingStatus.confirmed])
+            ).first()
+            
+            if existing_booking:
+                continue
+            
+            try:
+                # Create automatic booking in pending status
+                auto_booking = Booking(
+                    ride_id=trip.id,
+                    passenger_id=alert.user_id,
+                    status=BookingStatus.pending,
+                    seats=1,  # Default to 1 seat for auto-bookings
+                )
+                db.add(auto_booking)
+                
+                # Create notification
+                notification = create_notification(
+                    db=db,
+                    receiver_id=alert.user_id,
+                    type="auto_trip_match",
+                    message="¡Hemos encontrado un viaje para ti! Se ha encontrado un viaje que coincide con tu búsqueda automática.",
+                    ride_id=trip.id,
+                )
+                
+                db.commit()
+                print(f"Created new auto-booking and notification for user {alert.user_id} on ride {trip.id} after rejection")
+                
+            except Exception as e:
+                db.rollback()
+                print(f"Error creating auto-booking for user {alert.user_id} on ride {trip.id}: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
+    
+    print(f"Finished re-searching for passenger {passenger_id} after rejection of ride {rejected_ride_id}")

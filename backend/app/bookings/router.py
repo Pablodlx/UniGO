@@ -354,6 +354,17 @@ def reject_booking(
         db.refresh(system_message)
         db.refresh(notification)
         
+        # If this was an automatic booking (from a search alert), 
+        # re-trigger search for the passenger's active alerts to find other matching trips
+        try:
+            from app.rides.service import retry_search_for_rejected_auto_booking
+            retry_search_for_rejected_auto_booking(db, booking.passenger_id, ride.id)
+        except Exception as e:
+            print(f"Error retrying search for rejected auto-booking: {e}")
+            import traceback
+            traceback.print_exc()
+            # Don't fail the rejection if this fails
+        
         return {
             "success": True,
             "status": "rejected"
