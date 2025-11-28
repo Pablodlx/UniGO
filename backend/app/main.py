@@ -11,9 +11,10 @@ from app.ratings import router as ratings_router
 from app.chat.router import router as chat_router
 from app.trip_chat.router import router as trip_chat_router
 from app.notifications.router import router as notifications_router
+from app.search_alerts.router import router as search_alerts_router
 
 # Import all models to ensure they're registered
-from app.auth.models import User, Ride, Booking, EmailCode, Rating, FavoriteRide, Message, TripGroupMessage, Notification
+from app.auth.models import User, Ride, Booking, EmailCode, Rating, FavoriteRide, Message, TripGroupMessage, Notification, SearchAlert
 from app.db.session import Base, engine
 
 # Create all tables if they don't exist (development only)
@@ -152,3 +153,4 @@ app.include_router(passengers_router, prefix="/api")
 from app.bookings.router import router as bookings_router
 app.include_router(bookings_router, prefix="/api")
 app.include_router(notifications_router, prefix="/api")
+app.include_router(search_alerts_router, prefix="/api")

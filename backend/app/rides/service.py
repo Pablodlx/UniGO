@@ -5,9 +5,10 @@ import pytz
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
-from app.auth.models import Ride, User, Booking, BookingStatus
+from app.auth.models import Ride, User, Booking, BookingStatus, SearchAlert
 from app.rides.schemas import RideCreate, RideOut, RideSearch, PassengerInfo
 from app.core.maps import calculate_travel_time_sync
+from app.notifications.utils import create_notification
 # Import ratings service defensively to avoid breaking if ratings module has issues
 try:
     from app.ratings import service as ratings_service
@@ -229,6 +230,15 @@ def create_ride(db: Session, ride_data: RideCreate, driver_id: int) -> RideOut:
     db.add(ride)
     db.commit()
     db.refresh(ride)
+    
+    # Match search alerts with the new ride
+    try:
+        match_search_alerts_with_trip(db, ride)
+    except Exception as e:
+        # Log error but don't fail ride creation
+        print(f"Error matching search alerts with trip {ride.id}: {e}")
+        import traceback
+        print(traceback.format_exc())
     
     return get_ride_with_driver_info(db, ride.id)
 
@@ -497,3 +507,269 @@ def get_user_rides(db: Session, user_id: int) -> List[RideOut]:
         import traceback
         traceback.print_exc()
         return []
+
+
+def match_search_alerts_with_trip(db: Session, trip: Ride) -> None:
+    """
+    Match active search alerts with a newly created trip and automatically:
+    1. Create pending bookings for matching users
+    2. Send notifications to those users
+    
+    Args:
+        db: Database session
+        trip: The newly created Ride object
+    """
+    # Get day of week from trip departure_date (0=Monday, 6=Sunday)
+    trip_day_of_week = trip.departure_date.weekday()
+    
+    # Parse trip departure_time (format: "HH:MM")
+    try:
+        trip_time_parts = trip.departure_time.split(":")
+        trip_hour = int(trip_time_parts[0])
+        trip_minute = int(trip_time_parts[1])
+        trip_time_minutes = trip_hour * 60 + trip_minute
+    except (ValueError, IndexError):
+        print(f"Invalid trip departure_time format: {trip.departure_time}")
+        return
+    
+    # Get trip date (without time)
+    trip_date = trip.departure_date.date()
+    
+    # Find all active search alerts that match:
+    # 1. Destination matches (case-insensitive, partial match)
+    # 2. Origin matches (case-insensitive, partial match) - optional
+    # 3. Date matches (specific_dates has priority over days_of_week)
+    # 4. Time is within flexibility range
+    from sqlalchemy import func, text
+    
+    # Query alerts that match destination
+    all_alerts = db.query(SearchAlert).filter(
+        SearchAlert.active == True,
+        SearchAlert.destination.ilike(f"%{trip.destination_city}%"),
+    ).all()
+    
+    # Filter in Python to check date matching (specific_dates has priority)
+    matching_alerts = []
+    for alert in all_alerts:
+        date_matches = False
+        
+        # CASE 1: Alert uses specific_dates (PRIORITY)
+        if alert.specific_dates and len(alert.specific_dates) > 0:
+            date_matches = trip_date in alert.specific_dates
+        # CASE 2: Alert uses days_of_week (only if no specific_dates)
+        elif alert.days_of_week and len(alert.days_of_week) > 0:
+            date_matches = trip_day_of_week in alert.days_of_week
+        else:
+            # No date criteria, skip
+            continue
+        
+        # Alert matches if date matches
+        if date_matches:
+            matching_alerts.append(alert)
+    
+    print(f"Found {len(matching_alerts)} active search alerts for destination '{trip.destination_city}' on date {trip_date} (day {trip_day_of_week})")
+    
+    for alert in matching_alerts:
+        # Skip if origin doesn't match (optional check)
+        if alert.origin and not trip.departure_city.lower() in alert.origin.lower() and not alert.origin.lower() in trip.departure_city.lower():
+            continue
+        
+        # Parse alert target_time (format: "HH:MM")
+        try:
+            alert_time_parts = alert.target_time.split(":")
+            alert_hour = int(alert_time_parts[0])
+            alert_minute = int(alert_time_parts[1])
+            alert_time_minutes = alert_hour * 60 + alert_minute
+        except (ValueError, IndexError):
+            print(f"Invalid alert target_time format: {alert.target_time}")
+            continue
+        
+        # Check if trip time is within flexibility range
+        time_diff = abs(trip_time_minutes - alert_time_minutes)
+        if time_diff > alert.flexibility_minutes:
+            continue
+        
+        # Skip if user is the driver (can't book their own ride)
+        if alert.user_id == trip.driver_id:
+            continue
+        
+        # Check if user already has a booking for this ride
+        existing_booking = db.query(Booking).filter(
+            Booking.ride_id == trip.id,
+            Booking.passenger_id == alert.user_id,
+            Booking.status.in_([BookingStatus.pending, BookingStatus.confirmed])
+        ).first()
+        
+        if existing_booking:
+            print(f"User {alert.user_id} already has a booking for ride {trip.id}")
+            continue
+        
+        # Check if there are available seats
+        if trip.available_seats <= 0:
+            print(f"No available seats in ride {trip.id}")
+            continue
+        
+        try:
+            # Create automatic booking in pending status
+            auto_booking = Booking(
+                ride_id=trip.id,
+                passenger_id=alert.user_id,
+                status=BookingStatus.pending,
+                seats=1,  # Default to 1 seat for auto-bookings
+            )
+            db.add(auto_booking)
+            
+            # Create notification
+            notification = create_notification(
+                db=db,
+                receiver_id=alert.user_id,
+                type="auto_trip_match",
+                message="¡Hemos encontrado un viaje para ti! Se ha encontrado un viaje que coincide con tu búsqueda automática.",
+                ride_id=trip.id,
+            )
+            
+            db.commit()
+            print(f"Created auto-booking and notification for user {alert.user_id} on ride {trip.id}")
+            
+        except Exception as e:
+            db.rollback()
+            print(f"Error creating auto-booking for user {alert.user_id} on ride {trip.id}: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
+
+
+def match_existing_trips_with_alert(db: Session, alert: SearchAlert) -> None:
+    """
+    Match a newly created search alert with existing trips and automatically:
+    1. Create pending bookings for matching trips
+    2. Send notifications to the alert owner
+    
+    Args:
+        db: Database session
+        alert: The newly created SearchAlert object
+    """
+    from datetime import datetime, timezone, date as date_type
+    
+    # Parse alert target_time (format: "HH:MM")
+    try:
+        alert_time_parts = alert.target_time.split(":")
+        alert_hour = int(alert_time_parts[0])
+        alert_minute = int(alert_time_parts[1])
+        alert_time_minutes = alert_hour * 60 + alert_minute
+    except (ValueError, IndexError):
+        print(f"Invalid alert target_time format: {alert.target_time}")
+        return
+    
+    # Get current date to filter out past trips
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Find all active trips that match:
+    # 1. Destination matches (case-insensitive, partial match)
+    # 2. Origin matches (case-insensitive, partial match) - optional
+    # 3. Date matches (specific_dates has priority over days_of_week)
+    # 4. Time is within flexibility range
+    # 5. Trip is in the future
+    all_trips = db.query(Ride).filter(
+        Ride.is_active == True,
+        Ride.available_seats > 0,
+        Ride.departure_date >= today_start,  # Only future trips
+        Ride.destination_city.ilike(f"%{alert.destination}%"),
+    ).all()
+    
+    # Filter trips that match the alert criteria
+    matching_trips = []
+    for trip in all_trips:
+        # Skip if origin doesn't match (optional check)
+        if alert.origin and not trip.departure_city.lower() in alert.origin.lower() and not alert.origin.lower() in trip.departure_city.lower():
+            continue
+        
+        # Check date matching
+        trip_date = trip.departure_date.date()
+        trip_day_of_week = trip.departure_date.weekday()
+        date_matches = False
+        
+        # CASE 1: Alert uses specific_dates (PRIORITY)
+        if alert.specific_dates and len(alert.specific_dates) > 0:
+            date_matches = trip_date in alert.specific_dates
+        # CASE 2: Alert uses days_of_week (only if no specific_dates)
+        elif alert.days_of_week and len(alert.days_of_week) > 0:
+            date_matches = trip_day_of_week in alert.days_of_week
+        else:
+            # No date criteria, skip
+            continue
+        
+        if not date_matches:
+            continue
+        
+        # Parse trip departure_time (format: "HH:MM")
+        try:
+            trip_time_parts = trip.departure_time.split(":")
+            trip_hour = int(trip_time_parts[0])
+            trip_minute = int(trip_time_parts[1])
+            trip_time_minutes = trip_hour * 60 + trip_minute
+        except (ValueError, IndexError):
+            print(f"Invalid trip departure_time format: {trip.departure_time}")
+            continue
+        
+        # Check if trip time is within flexibility range
+        time_diff = abs(trip_time_minutes - alert_time_minutes)
+        if time_diff > alert.flexibility_minutes:
+            continue
+        
+        # Trip matches all criteria
+        matching_trips.append(trip)
+    
+    print(f"Found {len(matching_trips)} existing trips matching alert {alert.id} for destination '{alert.destination}'")
+    
+    # Create bookings and notifications for matching trips
+    for trip in matching_trips:
+        # Skip if user is the driver (can't book their own ride)
+        if alert.user_id == trip.driver_id:
+            continue
+        
+        # Check if user already has a booking for this ride
+        existing_booking = db.query(Booking).filter(
+            Booking.ride_id == trip.id,
+            Booking.passenger_id == alert.user_id,
+            Booking.status.in_([BookingStatus.pending, BookingStatus.confirmed])
+        ).first()
+        
+        if existing_booking:
+            print(f"User {alert.user_id} already has a booking for ride {trip.id}")
+            continue
+        
+        # Check if there are available seats
+        if trip.available_seats <= 0:
+            print(f"No available seats in ride {trip.id}")
+            continue
+        
+        try:
+            # Create automatic booking in pending status
+            auto_booking = Booking(
+                ride_id=trip.id,
+                passenger_id=alert.user_id,
+                status=BookingStatus.pending,
+                seats=1,  # Default to 1 seat for auto-bookings
+            )
+            db.add(auto_booking)
+            
+            # Create notification
+            notification = create_notification(
+                db=db,
+                receiver_id=alert.user_id,
+                type="auto_trip_match",
+                message="¡Hemos encontrado un viaje para ti! Se ha encontrado un viaje que coincide con tu búsqueda automática.",
+                ride_id=trip.id,
+            )
+            
+            db.commit()
+            print(f"Created auto-booking and notification for user {alert.user_id} on existing ride {trip.id}")
+            
+        except Exception as e:
+            db.rollback()
+            print(f"Error creating auto-booking for user {alert.user_id} on existing ride {trip.id}: {e}")
+            import traceback
+            traceback.print_exc()
+            continue

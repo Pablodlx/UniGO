@@ -11,6 +11,8 @@ import AddressAutocomplete, { AddressValue } from "@/components/AddressAutocompl
 import { addToSearchHistory } from "@/utils/searchHistory";
 import { isProfileComplete } from "@/utils/isProfileComplete";
 import { useToast } from "@/hooks/useToast";
+import AutoSearchModal from "@/components/AutoSearchModal";
+import ProfileIncompleteModal from "@/components/ProfileIncompleteModal";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000/api";
 
@@ -43,6 +45,8 @@ export default function Home() {
       lng: number;
     } | null;
   } | null>(null);
+  const [autoSearchModalOpen, setAutoSearchModalOpen] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -364,6 +368,12 @@ export default function Home() {
                   </svg>
                   <span>Mis Viajes</span>
                 </Link>
+                <Link href="/my-alerts" className="flex items-center space-x-2 text-gray-600 hover:text-orange-600 transition-colors font-medium">
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z"/>
+                  </svg>
+                  <span>Mis Alertas</span>
+                </Link>
               <button 
                 onClick={handleProfileClick}
                 className="flex items-center space-x-2 text-gray-600 hover:text-orange-600 transition-colors font-medium cursor-pointer"
@@ -392,9 +402,9 @@ export default function Home() {
               const formData = new FormData(e.target as HTMLFormElement);
               const date = formData.get('date') as string;
               handleSearch(date || "");
-            }} autoComplete="off" className="flex flex-col md:flex-row items-start md:items-end space-y-4 md:space-y-0 md:space-x-6" style={{ overflow: 'visible' }}>
+            }} autoComplete="off" className="flex flex-col md:flex-row items-start md:items-end space-y-4 md:space-y-0 md:space-x-4" style={{ overflow: 'visible' }}>
               {/* From Field */}
-              <div className="flex-1 w-full md:w-auto" style={{ overflow: 'visible', position: 'relative' }}>
+              <div className="flex-1 w-full md:w-auto md:min-w-[200px]" style={{ overflow: 'visible', position: 'relative' }}>
                 <AddressAutocomplete
                   id="search-from"
                   placeholder="Ej. Calle Gran Vía, 1"
@@ -414,7 +424,7 @@ export default function Home() {
               </div>
 
               {/* To Field */}
-              <div className="flex-1 w-full md:w-auto" style={{ overflow: 'visible', position: 'relative' }}>
+              <div className="flex-1 w-full md:w-auto md:min-w-[200px]" style={{ overflow: 'visible', position: 'relative' }}>
                 <AddressAutocomplete
                   id="search-to"
                   placeholder="Ej. Universidad CEU"
@@ -434,7 +444,7 @@ export default function Home() {
               </div>
 
               {/* Date Field */}
-              <div className="flex-1 w-full md:w-auto">
+              <div className="w-full md:w-auto md:min-w-[180px]">
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                     <svg className="w-6 h-6 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
@@ -452,13 +462,33 @@ export default function Home() {
               {/* Search Button */}
               <button
                 type="submit"
-                className="bg-orange-500 text-white px-10 py-5 rounded-xl font-semibold hover:bg-orange-600 transition-colors flex items-center space-x-3 shadow-lg text-lg w-full md:w-auto"
+                className="bg-orange-500 text-white px-8 py-5 rounded-xl font-semibold hover:bg-orange-600 transition-colors flex items-center justify-center space-x-2 shadow-lg text-base w-full md:w-auto whitespace-nowrap"
               >
-                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd"/>
                 </svg>
                 <span>Buscar</span>
               </button>
+
+              {/* Create Alert Button */}
+              {isLoggedIn && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isProfileComplete(userProfile)) {
+                      setShowProfileModal(true);
+                      return;
+                    }
+                    setAutoSearchModalOpen(true);
+                  }}
+                  className="bg-green-500 text-white px-8 py-5 rounded-xl font-semibold hover:bg-green-600 transition-colors flex items-center justify-center space-x-2 shadow-lg text-base w-full md:w-auto whitespace-nowrap"
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd"/>
+                  </svg>
+                  <span>Crear Alerta</span>
+                </button>
+              )}
             </form>
           </div>
 
@@ -551,6 +581,26 @@ export default function Home() {
         </div>
       </div>
       {ToastComponent}
+      
+      {/* Auto Search Modal */}
+      <AutoSearchModal
+        isOpen={autoSearchModalOpen}
+        onClose={() => setAutoSearchModalOpen(false)}
+        onSuccess={() => {
+          showToast("Búsqueda automática activada");
+        }}
+        onError={(message) => {
+          showToast(message);
+        }}
+        userUniversity={userUniversity}
+        userHomeAddress={userHomeAddress}
+      />
+
+      {/* Profile Incomplete Modal */}
+      <ProfileIncompleteModal
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+      />
     </DesktopLayout>
   );
 }

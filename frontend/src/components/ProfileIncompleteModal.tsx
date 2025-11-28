@@ -1,21 +1,12 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-
 interface ProfileIncompleteModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
 export default function ProfileIncompleteModal({ isOpen, onClose }: ProfileIncompleteModalProps) {
-  const router = useRouter();
-
   if (!isOpen) return null;
-
-  const handleGoToProfile = () => {
-    router.push("/profile/edit");
-    onClose();
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/20 backdrop-blur-md backdrop-saturate-200" onClick={onClose}>
@@ -33,16 +24,9 @@ export default function ProfileIncompleteModal({ isOpen, onClose }: ProfileIncom
             👤 Completa tu perfil
           </h2>
           
-          <p className="text-gray-600 text-center mb-8">
+          <p className="text-gray-600 text-center">
             Para continuar debes llenar todos los campos obligatorios de tu perfil.
           </p>
-          
-          <button
-            onClick={handleGoToProfile}
-            className="w-full bg-orange-500 text-white px-6 py-3 rounded-xl font-semibold hover:bg-orange-600 transition-colors shadow-lg"
-          >
-            Ir a mi perfil
-          </button>
         </div>
       </div>
     </div>

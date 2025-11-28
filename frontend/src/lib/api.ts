@@ -885,3 +885,87 @@ export async function markNotificationRead(notificationId: number): Promise<void
     headers: { ...authHeaders() },
   });
 }
+
+// Search Alerts
+export interface CreateSearchAlertRequest {
+  origin: string;
+  origin_lat: number;
+  origin_lng: number;
+  destination: string;
+  destination_lat: number;
+  destination_lng: number;
+  target_time: string; // "HH:MM" format
+  days_of_week?: number[]; // 0-6 (Monday-Sunday), optional
+  specific_dates?: string[]; // YYYY-MM-DD format, optional
+  flexibility_minutes: number;
+}
+
+export interface SearchAlert {
+  id: number;
+  user_id: number;
+  origin: string;
+  destination: string;
+  target_time: string;
+  days_of_week: number[];
+  flexibility_minutes: number;
+  active: boolean;
+  created_at: string;
+}
+
+export async function createSearchAlert(data: CreateSearchAlertRequest): Promise<SearchAlert> {
+  return fetchJson<SearchAlert>(`${BASE}/search-alerts`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getMySearchAlerts(): Promise<SearchAlert[]> {
+  return fetchJson<SearchAlert[]>(`${BASE}/search-alerts/my`, {
+    headers: { ...authHeaders() },
+  });
+}
+
+export async function getSearchAlert(alertId: number): Promise<SearchAlert> {
+  return fetchJson<SearchAlert>(`${BASE}/search-alerts/${alertId}`, {
+    headers: { ...authHeaders() },
+  });
+}
+
+export interface UpdateSearchAlertRequest {
+  origin?: string;
+  origin_lat?: number;
+  origin_lng?: number;
+  destination?: string;
+  destination_lat?: number;
+  destination_lng?: number;
+  target_time?: string;
+  days_of_week?: number[];
+  specific_dates?: string[];
+  flexibility_minutes?: number;
+  active?: boolean;
+}
+
+export async function updateSearchAlert(
+  alertId: number,
+  data: UpdateSearchAlertRequest
+): Promise<SearchAlert> {
+  return fetchJson<SearchAlert>(`${BASE}/search-alerts/${alertId}`, {
+    method: "PUT",
+    headers: {
+      ...authHeaders(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteSearchAlert(alertId: number): Promise<void> {
+  await fetchJson(`${BASE}/search-alerts/${alertId}`, {
+    method: "DELETE",
+    headers: { ...authHeaders() },
+  });
+}

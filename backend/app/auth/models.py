@@ -2,7 +2,7 @@ import enum
 from datetime import UTC, datetime
 
 from typing import Optional
-from sqlalchemy import Boolean, Column, DateTime, Enum, Integer, String, Text, Float, ForeignKey, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Enum, Integer, String, Text, Float, ForeignKey, UniqueConstraint, ARRAY, Time, Date
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
@@ -219,3 +219,22 @@ class Notification(Base):
     # Relationships
     receiver: Mapped["User"] = relationship("User", foreign_keys=[receiver_id])
     ride: Mapped[Optional["Ride"]] = relationship("Ride", foreign_keys=[ride_id])
+
+
+class SearchAlert(Base):
+    __tablename__ = "search_alerts"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    origin: Mapped[str] = mapped_column(String(100), nullable=False)
+    destination: Mapped[str] = mapped_column(String(100), nullable=False)
+    target_time: Mapped[str] = mapped_column(String(10), nullable=False)  # Time of day in "HH:MM" format
+    days_of_week: Mapped[list[int]] = mapped_column(ARRAY(Integer), nullable=True)  # 0-6 (Monday-Sunday), nullable
+    specific_dates: Mapped[list] = mapped_column(ARRAY(Date), nullable=True)  # Specific dates, nullable
+    flexibility_minutes: Mapped[int] = mapped_column(Integer, default=30, nullable=False)  # Minutes before/after target_time
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    
+    # Relationship to User
+    user: Mapped["User"] = relationship("User")

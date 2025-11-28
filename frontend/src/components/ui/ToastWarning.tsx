@@ -6,9 +6,10 @@ interface ToastWarningProps {
   message: string;
   onClose: () => void;
   duration?: number;
+  showProfileTitle?: boolean;
 }
 
-export default function ToastWarning({ message, onClose, duration = 5000 }: ToastWarningProps) {
+export default function ToastWarning({ message, onClose, duration = 5000, showProfileTitle = false }: ToastWarningProps) {
   const [isVisible, setIsVisible] = useState(true);
 
   useEffect(() => {
@@ -73,9 +74,11 @@ export default function ToastWarning({ message, onClose, duration = 5000 }: Toas
             ⚠️
           </div>
           <div style={{ flex: 1 }}>
-            <strong style={{ color: "#166534", display: "block", marginBottom: "4px", fontSize: "15px" }}>
-              Completa tu perfil
-            </strong>
+            {showProfileTitle && (
+              <strong style={{ color: "#166534", display: "block", marginBottom: "4px", fontSize: "15px" }}>
+                Completa tu perfil
+              </strong>
+            )}
             <p style={{ fontSize: "14px", color: "#666", margin: 0 }}>
               {message}
             </p>
