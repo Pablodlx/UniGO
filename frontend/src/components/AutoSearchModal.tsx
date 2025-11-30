@@ -166,7 +166,7 @@ export default function AutoSearchModal({
             </button>
           </div>
           <p className="text-sm text-gray-600 mt-2">
-            Te notificaremos automáticamente cuando haya un viaje que coincida con tu búsqueda
+            Guardaremos estos datos y buscaremos por ti viajes nuevos y existentes que encajen con tu origen, destino y horario. Cuando haya uno compatible, crearemos una reserva pendiente de confirmar por el conductor y te avisaremos. Si te rechazan, la búsqueda seguirá activa y continuará buscando.
           </p>
         </div>
 

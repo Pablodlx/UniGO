@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Ride, getCurrentUserId, getMyBookings } from "@/lib/api";
+import { Ride, getCurrentUserId, getMyBookings, RouteInfo } from "@/lib/api";
 import ActivityMapPreview from "@/components/ActivityMapPreview";
 import TripGroupChat from "@/components/TripGroupChat";
 import Image from "next/image";
@@ -29,6 +29,7 @@ export default function RideDetail({ ride, onBack, onContact, bookingSuccess = f
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [mounted, setMounted] = useState(false);
   const [showGroupChat, setShowGroupChat] = useState(false);
+  const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -227,7 +228,27 @@ export default function RideDetail({ ride, onBack, onContact, bookingSuccess = f
                 destinationLat={ride.destination_lat ?? undefined}
                 destinationLng={ride.destination_lng ?? undefined}
                 className="h-64"
+                onRouteInfoLoaded={(info) => setRouteInfo(info)}
               />
+              {/* Route Statistics */}
+              {routeInfo && (
+                <div className="p-4 border-t border-gray-200 bg-gray-50">
+                  <div className="grid grid-cols-2 gap-4 text-center">
+                    <div>
+                      <div className="text-sm text-gray-600 mb-1">Distancia</div>
+                      <div className="text-lg font-semibold text-gray-900">
+                        {routeInfo.distance_km.toFixed(1)} km
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-sm text-gray-600 mb-1">Duración</div>
+                      <div className="text-lg font-semibold text-gray-900">
+                        {formatDuration(routeInfo.duration_minutes)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Driver Details Card */}

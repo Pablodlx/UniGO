@@ -362,6 +362,31 @@ export async function getRide(ride_id: number): Promise<Ride> {
   return fetchJson<Ride>(`${BASE}/rides/${ride_id}`);
 }
 
+export interface RouteInfo {
+  distance_km: number;
+  duration_minutes: number;
+  suggested_price: number;
+  polyline: string | null;
+}
+
+export async function getRouteInfo(
+  origin_lat: number,
+  origin_lng: number,
+  destination_lat: number,
+  destination_lng: number
+): Promise<RouteInfo> {
+  const params = new URLSearchParams({
+    origin_lat: origin_lat.toString(),
+    origin_lng: origin_lng.toString(),
+    destination_lat: destination_lat.toString(),
+    destination_lng: destination_lng.toString(),
+  });
+  
+  return fetchJson<RouteInfo>(`${BASE}/rides/route-info?${params.toString()}`, {
+    headers: { ...authHeaders() },
+  });
+}
+
 export async function getMyRides(): Promise<Ride[]> {
   return fetchJson<Ride[]>(`${BASE}/rides/my-rides`, {
     headers: { ...authHeaders() },

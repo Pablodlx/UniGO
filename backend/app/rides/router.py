@@ -7,7 +7,7 @@ from app.auth.models import Ride, User, Booking, BookingStatus, Notification
 from app.auth.router import get_current_user
 from app.db.session import get_db
 from app.rides import service
-from app.rides.schemas import RideCreate, RideOut, RideSearch, Passenger
+from app.rides.schemas import RideCreate, RideOut, RideSearch, Passenger, RouteInfoResponse
 from app.rides import favorites_service
 from app.rides.favorites_schemas import FavoriteRideCreate, FavoriteRideOut
 from app.utils.profile_validation import is_profile_complete
@@ -94,6 +94,40 @@ def search_rides(
         "exact_matches": [ride.model_dump() for ride in exact_matches],
         "nearby_matches": nearby_matches
     }
+
+
+@router.get("/route-info", response_model=RouteInfoResponse)
+def get_route_info_endpoint(
+    origin_lat: float = Query(..., description="Origin latitude"),
+    origin_lng: float = Query(..., description="Origin longitude"),
+    destination_lat: float = Query(..., description="Destination latitude"),
+    destination_lng: float = Query(..., description="Destination longitude"),
+):
+    """
+    Get route information including distance, duration, suggested price, and polyline.
+    Uses Google Directions API if available, otherwise falls back to haversine calculation.
+    """
+    from app.core.maps import get_route_info as get_route_info_func
+    
+    try:
+        route_info = get_route_info_func(
+            origin_lat=origin_lat,
+            origin_lng=origin_lng,
+            destination_lat=destination_lat,
+            destination_lng=destination_lng,
+        )
+        
+        return RouteInfoResponse(
+            distance_km=route_info["distance_km"],
+            duration_minutes=route_info["duration_minutes"],
+            suggested_price=route_info["suggested_price"],
+            polyline=route_info.get("polyline"),
+        )
+    except Exception as e:
+        import traceback
+        print(f"Error getting route info: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Error getting route info: {str(e)}")
 
 
 @router.get("/my-rides", response_model=List[RideOut])

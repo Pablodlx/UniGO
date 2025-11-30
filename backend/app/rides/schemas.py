@@ -94,3 +94,11 @@ class Passenger(BaseModel):
 class SearchRidesResponse(BaseModel):
     exact_matches: List[RideOut] = []
     nearby_matches: List[dict] = []  # RideOut with additional distance fields
+
+
+class RouteInfoResponse(BaseModel):
+    """Response schema for route information endpoint"""
+    distance_km: float
+    duration_minutes: int
+    suggested_price: float
+    polyline: Optional[str] = None
