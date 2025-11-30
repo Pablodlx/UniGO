@@ -574,12 +574,16 @@ def book_ride(
     if existing_booking:
         raise HTTPException(status_code=400, detail="You already have a booking for this ride")
     
-    # Check if there are enough seats (we check this but don't deduct yet)
-    if ride.available_seats < seats:
-        raise HTTPException(status_code=400, detail="Not enough available seats")
+    # OVERBOOKING CONTROLADO: Permitir crear reservas PENDING sin verificar capacidad
+    # Solo verificamos que el viaje tenga al menos 1 asiento disponible para mostrar que hay capacidad
+    # Las reservas PENDING no consumen asientos; solo las CONFIRMED lo hacen
+    if ride.available_seats <= 0:
+        raise HTTPException(status_code=400, detail="This ride has no available seats")
     
     try:
+        print(f"[BOOKING CREATION] Creating pending booking for user {current_user.id} on ride {ride_id} ({seats} seats)")
         # Create booking record in pending status
+        # IMPORTANTE: No decrementamos available_seats aquí porque la reserva está en PENDING
         booking = Booking(
             ride_id=ride_id,
             passenger_id=current_user.id,
@@ -589,6 +593,8 @@ def book_ride(
         db.add(booking)
         db.commit()
         db.refresh(booking)
+        
+        print(f"[BOOKING CREATION] ✅ Created pending booking {booking.id} for user {current_user.id} on ride {ride_id}")
         
         # Return success with pending status
         return {"success": True, "status": "pending", "booking_id": booking.id}

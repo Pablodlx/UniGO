@@ -3,13 +3,18 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
+import logging
+import threading
 
 from app.auth import service
 from app.auth.models import User
 from app.auth.schemas import Token, UserCreate, UserLogin, UserOut, VerifyEmail
 from app.core.config import settings
-from app.core.mailer import send_verification_email
+from app.core.email import send_verification_email_sync, send_verification_email
 from app.db.session import get_db
+
+# Configure logger
+log = logging.getLogger(__name__)
 
 # Nota: este router ya incluye el prefijo /api; en main.py se debe incluir SIN prefijo adicional.
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -26,13 +31,117 @@ def register_user(
 ) -> Response:
     """
     Crea/actualiza usuario y genera un código de verificación.
-    Envía el email en segundo plano (mailer síncrono con kwargs).
+    Envía el email en segundo plano (async email service).
+    
+    FLUJO COMPLETO:
+    1. Se crea el usuario en la base de datos
+    2. Se genera un código de verificación de 6 dígitos
+    3. Se envía el email automáticamente usando Mailjet (o el backend configurado)
     """
-    code = service.register(db, data)  # debe devolver el string de 6 dígitos
-
-    # ⚠️ IMPORTANTE: pasar argumentos por nombre (la función no acepta posicionales)
-    bg.add_task(send_verification_email, to_email=data.email, code=code)
-    return Response(status_code=204)
+    # FORZAR LOGS INMEDIATAMENTE
+    import sys
+    print("=" * 70, flush=True)
+    print(f"[Register] ===== INICIANDO REGISTRO PARA {data.email} =====", flush=True)
+    print("=" * 70, flush=True)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    
+    log.info("=" * 70)
+    log.info(f"[Register] ===== INICIANDO REGISTRO PARA {data.email} =====")
+    log.info("=" * 70)
+    sys.stdout.flush()
+    
+    try:
+        # PASO 1: Generar código de verificación y crear usuario
+        print(f"[Register] Paso 1: Llamando a service.register() para {data.email}", flush=True)
+        log.info(f"[Register] Paso 1: Llamando a service.register() para {data.email}")
+        sys.stdout.flush()
+        
+        code = service.register(db, data)  # Devuelve el string del código de 6 dígitos
+        
+        print(f"[Register] Paso 2: Usuario registrado exitosamente", flush=True)
+        print(f"[Register] Paso 3: Código generado: {code}", flush=True)
+        log.info(f"[Register] Paso 2: Usuario registrado exitosamente")
+        log.info(f"[Register] Paso 3: Código de verificación generado: {code} para {data.email}")
+        sys.stdout.flush()
+        
+        # PASO 2: Enviar email de verificación INMEDIATAMENTE (ANTES de responder)
+        # IMPORTANTE: Esto se ejecuta SÍNCRONO y BLOQUEA hasta que el email se envíe
+        print(f"[Register] Paso 4: ENVIANDO EMAIL INMEDIATAMENTE (BLOQUEANTE)", flush=True)
+        print(f"[Register] Email={data.email}, Code={code}", flush=True)
+        log.info(f"[Register] Paso 4: Enviando email INMEDIATAMENTE (BLOQUEANTE - antes de respuesta HTTP)")
+        log.info(f"[Register] Email={data.email}, Code={code}")
+        sys.stdout.flush()
+        sys.stderr.flush()
+        
+        email_sent = False
+        try:
+            print(f"[Register] ⚡ LLAMANDO send_verification_email_sync() - ESPERANDO RESPUESTA...", flush=True)
+            log.info(f"[Register] ⚡ EJECUTANDO send_verification_email_sync() AHORA - ESPERANDO RESPUESTA")
+            sys.stdout.flush()
+            
+            # LLAMAR DIRECTAMENTE Y ESPERAR - ESTO BLOQUEA HASTA QUE SE ENVÍE
+            send_verification_email_sync(data.email, code)
+            email_sent = True
+            
+            print(f"[Register] ⚡ send_verification_email_sync() COMPLETADO", flush=True)
+            print(f"[Register] ✅ Email enviado exitosamente INMEDIATAMENTE", flush=True)
+            log.info(f"[Register] ⚡ send_verification_email_sync() COMPLETADO")
+            log.info(f"[Register] ✅ Email enviado exitosamente a {data.email} INMEDIATAMENTE")
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except Exception as e:
+            print("=" * 70, flush=True)
+            print(f"[Register] ❌❌❌ ERROR AL ENVIAR EMAIL ❌❌❌", flush=True)
+            print(f"[Register] Error: {str(e)}", flush=True)
+            print("=" * 70, flush=True)
+            log.error("=" * 70)
+            log.error(f"[Register] ❌❌❌ ERROR CRÍTICO al enviar email ❌❌❌")
+            log.error(f"[Register] Email={data.email}, Code={code}")
+            log.error(f"[Register] Error: {str(e)}")
+            log.error("=" * 70)
+            sys.stdout.flush()
+            sys.stderr.flush()
+            import traceback
+            traceback.print_exc()
+            # NO fallar el registro si el email falla, pero loguear el error
+        
+        # NO usar BackgroundTasks - ya enviamos directamente y bloqueamos
+        # Si el email se envió correctamente, no necesitamos BackgroundTasks
+        if not email_sent:
+            print(f"[Register] Paso 5: Email NO enviado, añadiendo a BackgroundTasks como último intento", flush=True)
+            log.warning(f"[Register] Paso 5: Email NO enviado, añadiendo a BackgroundTasks como último intento")
+            bg.add_task(send_verification_email_sync, email=data.email, code=code)
+        else:
+            print(f"[Register] Paso 5: Email ya enviado, NO usando BackgroundTasks", flush=True)
+            log.info(f"[Register] Paso 5: Email ya enviado, NO usando BackgroundTasks")
+        sys.stdout.flush()
+        
+        print(f"[Register] Paso 6: Enviando respuesta HTTP 204", flush=True)
+        log.info(f"[Register] Paso 6: Registro completado. Enviando respuesta HTTP 204")
+        print("=" * 70, flush=True)
+        log.info("=" * 70)
+        log.info(f"[Register] ===== REGISTRO COMPLETADO PARA {data.email} =====")
+        log.info("=" * 70)
+        sys.stdout.flush()
+        
+        return Response(status_code=204)
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions (validation errors, etc.)
+        raise
+    except Exception as e:
+        print(f"[Register] ❌ ERROR CRÍTICO: {e}", flush=True)
+        log.error(
+            f"[Register] ❌ ERROR CRÍTICO durante el registro de {data.email}: {e}",
+            exc_info=True
+        )
+        sys.stdout.flush()
+        sys.stderr.flush()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno durante el registro: {str(e)}"
+        )
 
 
 @router.post("/verify", response_model=Token)

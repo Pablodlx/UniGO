@@ -3,7 +3,7 @@
 # 🎓 UniGo
 
 **UniGo** es una aplicación fullstack (FastAPI + React) para carpooling universitario.  
-Incluye registro con email institucional, verificación por código (correo vía MailHog en desarrollo) e inicio de sesión con JWT.  
+Incluye registro con email institucional, verificación por código (correo vía SMTP con TLS/SSL, configurable para desarrollo con MailHog o producción) e inicio de sesión con JWT.  
 Infra con Postgres, Prometheus y Grafana para observabilidad.
 
 ---
@@ -60,18 +60,48 @@ DATABASE_URL=postgresql+psycopg2://unigo:unigo@localhost:5432/unigo
 
 EMAIL_CODE_EXPIRE_MINUTES=15
 
+# Email Configuration
+# IMPORTANT: Set EMAIL_BACKEND to control email delivery
+# EMAIL_BACKEND="smtp" → Real SMTP (emails go to real inbox)
+# EMAIL_BACKEND!="smtp" → Development mode (emails go to MailHog)
+
+# For development with MailHog (default):
+EMAIL_BACKEND=mailhog
+EMAIL_PROVIDER=MailHog
+SMTP_HOST=127.0.0.1
+SMTP_PORT=1025
+
+# For production with real SMTP (Gmail, Outlook, SendGrid, etc.):
+# EMAIL_BACKEND=smtp
+# EMAIL_PROVIDER=Gmail
+# SMTP_HOST=smtp.gmail.com
+# SMTP_PORT=587
+# SMTP_USERNAME=your-email@gmail.com
+# SMTP_PASSWORD=your-app-password
+# SMTP_USE_TLS=true
+# SMTP_USE_SSL=false
+# EMAIL_FROM_NAME=UniGO
+# EMAIL_FROM=your-email@gmail.com
+
+# For Outlook.com / Hotmail:
+# EMAIL_BACKEND=smtp
+# EMAIL_PROVIDER=Outlook.com
+# SMTP_HOST=smtp-mail.outlook.com
+# SMTP_PORT=587
+# SMTP_USERNAME=your-email@outlook.com
+# SMTP_PASSWORD=your-app-password
+# SMTP_USE_TLS=true
+# SMTP_USE_SSL=false
+# EMAIL_FROM_NAME=UniGO
+# EMAIL_FROM=your-email@outlook.com
+
+# Legacy mail variables (kept for backward compatibility)
 MAIL_USERNAME=
-
 MAIL_PASSWORD=
-
 MAIL_FROM=unigo@soporte.com
-
 MAIL_PORT=1025
-
 MAIL_SERVER=127.0.0.1
-
 MAIL_STARTTLS=False
-
 MAIL_SSL_TLS=False
 
 ALLOWED_EMAIL_DOMAINS=ugr.es, us.es, uma.es, ucm.es, upm.es, uab.cat, ub.edu, uoc.edu, upc.edu, upf.edu, ehu.eus, unizar.es, upna.es, uva.es, uclm.es, uniovi.es, unileon.es, unican.es, uib.es, ulpgc.es, um.es, upct.es, uex.es

@@ -3,6 +3,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import os
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+log = logging.getLogger(__name__)
 
 from app.auth.router import router as auth_router
 from app.profile import router as profile_router
@@ -38,6 +47,22 @@ if 'bookings' not in inspector.get_table_names():
         conn.commit()
 
 app = FastAPI(title="UniGo", version="0.1.0")
+
+# Log startup information
+log.info("=" * 70)
+log.info("🚀 Starting UniGO Backend")
+log.info("=" * 70)
+
+# Log email configuration
+from app.core.email import get_email_service
+email_service = get_email_service()
+log.info(f"📧 Email Service Configuration:")
+log.info(f"   Backend: {email_service.email_backend}")
+log.info(f"   Mailjet: {email_service.use_mailjet}")
+log.info(f"   SendGrid: {email_service.use_sendgrid}")
+log.info(f"   Real SMTP: {email_service.use_real_smtp}")
+log.info(f"   From: {email_service.email_from}")
+log.info("=" * 70)
 
 app.add_middleware(
     CORSMiddleware,

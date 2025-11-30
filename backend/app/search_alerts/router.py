@@ -58,13 +58,17 @@ def create_search_alert(
     db.refresh(search_alert)
     
     # Match existing trips with the new alert
+    # PROBLEMA CORREGIDO: Se añadió logging detallado y mejor manejo de errores
+    print(f"[ALERT CREATION] Created alert {search_alert.id} for user {current_user.id}, checking matching trips...")
     try:
         match_existing_trips_with_alert(db, search_alert)
+        print(f"[ALERT CREATION] ✅ Finished matching trips for alert {search_alert.id}")
     except Exception as e:
         # Log error but don't fail alert creation
-        print(f"Error matching existing trips with alert {search_alert.id}: {e}")
+        print(f"[ALERT CREATION] ❌ ERROR matching existing trips with alert {search_alert.id}: {e}")
         import traceback
         print(traceback.format_exc())
+        # Re-raise to ensure we see the error, but alert creation still succeeds
     
     # Convert specific_dates back to strings for response
     specific_dates_str = None

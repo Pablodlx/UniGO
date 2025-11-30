@@ -197,9 +197,17 @@ def accept_booking(
     """
     Accept a pending booking request.
     Only the driver of the ride can accept.
+    
+    OVERBOOKING CONTROLADO:
+    - Las reservas PENDING no consumen asientos
+    - Solo las reservas CONFIRMED consumen asientos
+    - Al confirmar una reserva, se verifica que haya asientos disponibles
+    - Si se agota la capacidad, se rechazan automáticamente todas las demás reservas PENDING del mismo viaje
+    
     This will:
     - Change booking status to confirmed
-    - Decrease available_seats in the ride
+    - Decrease available_seats in the ride (solo las CONFIRMED consumen asientos)
+    - Reject other pending bookings if capacity is exhausted
     """
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
@@ -210,6 +218,19 @@ def accept_booking(
     
     # Verify that the current user is the driver of the ride
     ride = db.query(Ride).filter(Ride.id == booking.ride_id).first()
+    if not ride:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ride not found"
+        )
+    
+    print("=" * 70)
+    print(f"[BOOKING ACCEPT] Driver {current_user.id} accepting booking {booking_id}")
+    print(f"  Passenger: {booking.passenger_id}")
+    print(f"  Trip: {ride.departure_city} → {ride.destination_city}")
+    print(f"  Seats: {booking.seats}")
+    print(f"  Current available_seats: {ride.available_seats}")
+    print("=" * 70)
     if not ride:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -229,29 +250,48 @@ def accept_booking(
             detail=f"Booking is not in pending status (current: {booking.status})"
         )
     
-    # Verify there are enough available seats
+    # OVERBOOKING CONTROLADO: Calcular asientos disponibles basándose en CONFIRMED bookings
+    # No confiar solo en ride.available_seats, calcular desde las reservas CONFIRMED
+    confirmed_bookings = db.query(Booking).filter(
+        Booking.ride_id == ride.id,
+        Booking.status == BookingStatus.confirmed
+    ).all()
+    
+    confirmed_seats = sum(b.seats for b in confirmed_bookings)
+    
+    # Calcular asientos disponibles reales
+    # Asumimos que ride.available_seats es el total de asientos del viaje
+    # (si no, necesitaríamos un campo total_seats en Ride)
+    # Por ahora, usamos available_seats como referencia y calculamos desde confirmed bookings
+    # Si available_seats ya refleja las reservas confirmadas, usamos ese valor
+    # Si no, calculamos: total_seats - confirmed_seats
+    # Por simplicidad, asumimos que available_seats ya está actualizado correctamente
+    
+    # Verificar que hay suficientes asientos disponibles
     if ride.available_seats < booking.seats:
+        print(f"[BOOKING ACCEPT] ❌ Not enough available seats: {ride.available_seats} < {booking.seats}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Not enough available seats"
         )
     
     try:
+        print(f"[BOOKING ACCEPT] Driver {current_user.id} accepted booking {booking_id} for trip {ride.id} -> confirming and consuming {booking.seats} seat(s)")
+        
         # Update booking status to confirmed
         booking.status = BookingStatus.confirmed
         
-        # Decrease available seats
+        # Decrease available seats (solo las CONFIRMED consumen asientos)
         ride.available_seats -= booking.seats
         
+        print(f"[BOOKING ACCEPT] Trip {ride.id} now has {ride.available_seats} available seats remaining")
+        
         # Crear mensaje automático para notificación al pasajero
-        # Este mensaje será detectado por GET /api/chat/unread-summary
-        # porque cumple: receiver_id == passenger_id, read_at IS NULL, trip_id == ride.id
         system_message = Message(
-            trip_id=ride.id,                        # debe coincidir EXACTAMENTE
-            sender_id=ride.driver_id,               # el conductor envía el mensaje
-            receiver_id=booking.passenger_id,       # el pasajero recibe la notificación
+            trip_id=ride.id,
+            sender_id=ride.driver_id,
+            receiver_id=booking.passenger_id,
             message="Tu reserva ha sido CONFIRMADA por el conductor."
-            # read_at queda NULL automáticamente (por defecto en el modelo)
         )
         db.add(system_message)
         
@@ -264,11 +304,58 @@ def accept_booking(
         )
         db.add(notification)
         
+        # OVERBOOKING CONTROLADO: Si se agotaron los asientos, rechazar automáticamente otras reservas PENDING
+        rejected_count = 0
+        if ride.available_seats <= 0:
+            print(f"[BOOKING ACCEPT] ⚠️ Trip {ride.id} has no more available seats, rejecting other pending bookings")
+            
+            # Buscar todas las reservas PENDING del mismo viaje (excluyendo la que acabamos de confirmar)
+            other_pending_bookings = db.query(Booking).filter(
+                Booking.ride_id == ride.id,
+                Booking.status == BookingStatus.pending,
+                Booking.id != booking.id
+            ).all()
+            for other_booking in other_pending_bookings:
+                print(f"[BOOKING ACCEPT] Rejecting pending booking {other_booking.id} for passenger {other_booking.passenger_id} (no more seats)")
+                
+                # Cambiar estado a rejected
+                other_booking.status = BookingStatus.rejected
+                
+                # Crear notificación para el pasajero rechazado
+                rejected_notification = Notification(
+                    receiver_id=other_booking.passenger_id,
+                    type="booking_update",
+                    ride_id=ride.id,
+                    message=f"Tu reserva para el viaje {ride.departure_city} → {ride.destination_city} ha sido RECHAZADA automáticamente porque el viaje ya no tiene plazas disponibles.",
+                )
+                db.add(rejected_notification)
+                
+                # Crear mensaje automático
+                rejected_message = Message(
+                    trip_id=ride.id,
+                    sender_id=ride.driver_id,
+                    receiver_id=other_booking.passenger_id,
+                    message=f"Tu solicitud de reserva para el viaje {ride.departure_city} → {ride.destination_city} ha sido rechazada automáticamente porque el viaje ya no tiene plazas disponibles."
+                )
+                db.add(rejected_message)
+                
+                rejected_count += 1
+            
+            if rejected_count > 0:
+                print(f"[BOOKING ACCEPT] ✅ Automatically rejected {rejected_count} pending bookings for trip {ride.id}")
+        
         db.commit()
         db.refresh(ride)
         db.refresh(booking)
         db.refresh(system_message)
         db.refresh(notification)
+        
+        print("=" * 70)
+        print(f"[BOOKING ACCEPT] ✅✅✅ SUCCESS: Booking {booking_id} confirmed for trip {ride.id}")
+        print(f"  Available seats remaining: {ride.available_seats}")
+        if rejected_count > 0:
+            print(f"  Automatically rejected {rejected_count} other pending bookings (capacity exhausted)")
+        print("=" * 70)
         
         return {
             "success": True,
@@ -277,7 +364,9 @@ def accept_booking(
         }
     except Exception as e:
         db.rollback()
-        print(f"Error accepting booking: {e}")
+        print(f"[BOOKING ACCEPT] ❌ ERROR accepting booking {booking_id}: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to accept booking: {str(e)}"
@@ -325,18 +414,26 @@ def reject_booking(
         )
     
     try:
+        print("=" * 70)
+        print(f"[BOOKING REJECT] Driver {current_user.id} rejecting booking {booking_id} for trip {ride.id}")
+        print(f"  Passenger: {booking.passenger_id}")
+        print(f"  Trip: {ride.departure_city} → {ride.destination_city}")
+        print("=" * 70)
+        
         # Update booking status to rejected
         booking.status = BookingStatus.rejected
         
+        # REGLA CRÍTICA: Las reservas REJECTED NO desactivan la alerta
+        # La alerta permanece activa (alert.active = True) y puede crear nuevas reservas para futuros viajes
+        # NO modificamos alert.active aquí - la alerta sigue funcionando
+        print(f"[BOOKING REJECT] ✅ Booking {booking_id} rejected. Alert remains active and will continue searching for matching trips.")
+        
         # Crear mensaje automático para notificación al pasajero
-        # Este mensaje será detectado por GET /api/chat/unread-summary
-        # porque cumple: receiver_id == passenger_id, read_at IS NULL, trip_id == ride.id
         system_message = Message(
-            trip_id=ride.id,                        # debe coincidir EXACTAMENTE
-            sender_id=ride.driver_id,               # el conductor envía el mensaje
-            receiver_id=booking.passenger_id,       # el pasajero recibe la notificación
+            trip_id=ride.id,
+            sender_id=ride.driver_id,
+            receiver_id=booking.passenger_id,
             message=f"Tu solicitud de reserva para el viaje {ride.departure_city} → {ride.destination_city} ha sido rechazada."
-            # read_at queda NULL automáticamente (por defecto en el modelo)
         )
         db.add(system_message)
         
@@ -356,14 +453,22 @@ def reject_booking(
         
         # If this was an automatic booking (from a search alert), 
         # re-trigger search for the passenger's active alerts to find other matching trips
+        # IMPORTANTE: Esto NO desactiva la alerta, solo busca nuevos viajes compatibles
         try:
             from app.rides.service import retry_search_for_rejected_auto_booking
+            print(f"[BOOKING REJECT] Re-triggering search for passenger {booking.passenger_id}'s active alerts after rejection of trip {ride.id}")
             retry_search_for_rejected_auto_booking(db, booking.passenger_id, ride.id)
         except Exception as e:
-            print(f"Error retrying search for rejected auto-booking: {e}")
+            print(f"[BOOKING REJECT] Error retrying search for rejected auto-booking: {e}")
             import traceback
             traceback.print_exc()
             # Don't fail the rejection if this fails
+        
+        print("=" * 70)
+        print(f"[BOOKING REJECT] ✅✅✅ SUCCESS: Booking {booking_id} rejected")
+        print(f"  Alert remains active for future matches")
+        print(f"  Re-triggering search for passenger {booking.passenger_id}'s active alerts")
+        print("=" * 70)
         
         return {
             "success": True,

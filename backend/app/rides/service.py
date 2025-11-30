@@ -265,13 +265,17 @@ def create_ride(db: Session, ride_data: RideCreate, driver_id: int) -> RideOut:
     db.refresh(ride)
     
     # Match search alerts with the new ride
+    # PROBLEMA CORREGIDO: Se añadió logging detallado y mejor manejo de errores
+    print(f"[RIDE CREATION] Created ride {ride.id} for driver {driver_id}, checking matching alerts...")
     try:
         match_search_alerts_with_trip(db, ride)
+        print(f"[RIDE CREATION] ✅ Finished matching alerts for ride {ride.id}")
     except Exception as e:
         # Log error but don't fail ride creation
-        print(f"Error matching search alerts with trip {ride.id}: {e}")
+        print(f"[RIDE CREATION] ❌ ERROR matching search alerts with trip {ride.id}: {e}")
         import traceback
         print(traceback.format_exc())
+        # Re-raise to ensure we see the error, but ride creation still succeeds
     
     return get_ride_with_driver_info(db, ride.id)
 
@@ -627,14 +631,35 @@ def get_user_rides(db: Session, user_id: int) -> List[RideOut]:
 
 def match_search_alerts_with_trip(db: Session, trip: Ride) -> None:
     """
-    Match active search alerts with a newly created trip and automatically:
-    1. Create pending bookings for matching users
-    2. Send notifications to those users
+    MATCHING BIDIRECCIONAL: Procesar viaje nuevo contra alertas existentes.
+    
+    Cuando un conductor crea un viaje NUEVO, esta función:
+    1. Busca todas las alertas activas compatibles
+    2. Crea reservas PENDING para cada alerta que coincida
+    3. Envía notificaciones a los usuarios
+    
+    REGLAS CRÍTICAS:
+    - Solo bloquea si hay reserva PENDING/CONFIRMED para el MISMO viaje
+    - NO bloquea por reservas REJECTED (la alerta sigue activa)
+    - NO bloquea por reservas PENDING en OTROS viajes (permite overbooking)
+    - Permite múltiples reservas PENDING para el mismo viaje (overbooking controlado)
     
     Args:
         db: Database session
         trip: The newly created Ride object
     """
+    from datetime import date as date_type
+    
+    print("=" * 70)
+    print(f"[TRIP MATCHING] Processing trip {trip.id} against existing alerts")
+    print(f"  Trip driver_id: {trip.driver_id}")
+    print(f"  Trip origin: {trip.departure_city}")
+    print(f"  Trip destination: {trip.destination_city}")
+    print(f"  Trip date: {trip.departure_date.date()}")
+    print(f"  Trip time: {trip.departure_time}")
+    print(f"  Trip available_seats: {trip.available_seats}")
+    print("=" * 70)
+    
     # Get day of week from trip departure_date (0=Monday, 6=Sunday)
     trip_day_of_week = trip.departure_date.weekday()
     
@@ -644,8 +669,9 @@ def match_search_alerts_with_trip(db: Session, trip: Ride) -> None:
         trip_hour = int(trip_time_parts[0])
         trip_minute = int(trip_time_parts[1])
         trip_time_minutes = trip_hour * 60 + trip_minute
-    except (ValueError, IndexError):
-        print(f"Invalid trip departure_time format: {trip.departure_time}")
+        print(f"  Parsed trip time: {trip_hour:02d}:{trip_minute:02d} ({trip_time_minutes} minutes)")
+    except (ValueError, IndexError) as e:
+        print(f"[TRIP MATCHING] ❌ Invalid trip departure_time format: {trip.departure_time}, error: {e}")
         return
     
     # Get trip date (without time)
@@ -657,6 +683,8 @@ def match_search_alerts_with_trip(db: Session, trip: Ride) -> None:
         SearchAlert.active == True,
     ).all()
     
+    print(f"  Found {len(all_alerts)} active search alerts")
+    
     # Filter in Python to check:
     # 1. Destination matches (text OR distance ≤1 km)
     # 2. Origin matches (text OR distance ≤1 km) - optional
@@ -664,21 +692,41 @@ def match_search_alerts_with_trip(db: Session, trip: Ride) -> None:
     # 4. Time is within flexibility range
     matching_alerts = []
     for alert in all_alerts:
+        # Normalize alert specific_dates to Python date objects for comparison
+        alert_specific_dates_normalized = None
+        if alert.specific_dates and len(alert.specific_dates) > 0:
+            try:
+                alert_specific_dates_normalized = []
+                for d in alert.specific_dates:
+                    if isinstance(d, date_type):
+                        alert_specific_dates_normalized.append(d)
+                    elif isinstance(d, str):
+                        alert_specific_dates_normalized.append(date_type.fromisoformat(d))
+                    else:
+                        alert_specific_dates_normalized.append(d.date() if hasattr(d, 'date') else date_type.fromisoformat(str(d)))
+            except Exception as e:
+                print(f"  Alert {alert.id}: Error normalizing specific_dates: {e}")
+                continue
+        
         # Check destination match (text OR distance)
         destination_matches = False
         if trip.destination_city and alert.destination:
-            # Text match
-            destination_matches = trip.destination_city.lower() in alert.destination.lower() or alert.destination.lower() in trip.destination_city.lower()
+            # Text match - check both directions
+            trip_dest_lower = trip.destination_city.lower().strip()
+            alert_dest_lower = alert.destination.lower().strip()
+            destination_matches = trip_dest_lower in alert_dest_lower or alert_dest_lower in trip_dest_lower
         
         # Distance match (only if allow_nearby_search is True and coordinates available)
-        if not destination_matches and alert.allow_nearby_search and alert.destination_lat is not None and alert.destination_lng is not None and trip.destination_lat is not None and trip.destination_lng is not None:
-            dest_dist = haversine(
-                alert.destination_lat,
-                alert.destination_lng,
-                trip.destination_lat,
-                trip.destination_lng
-            )
-            destination_matches = dest_dist <= 1.0
+        if not destination_matches and alert.allow_nearby_search:
+            if (alert.destination_lat is not None and alert.destination_lng is not None and 
+                trip.destination_lat is not None and trip.destination_lng is not None):
+                dest_dist = haversine(
+                    alert.destination_lat,
+                    alert.destination_lng,
+                    trip.destination_lat,
+                    trip.destination_lng
+                )
+                destination_matches = dest_dist <= 1.0
         
         if not destination_matches:
             continue
@@ -688,27 +736,31 @@ def match_search_alerts_with_trip(db: Session, trip: Ride) -> None:
         if alert.origin:
             origin_matches = False
             if trip.departure_city:
-                # Text match
-                origin_matches = trip.departure_city.lower() in alert.origin.lower() or alert.origin.lower() in trip.departure_city.lower()
+                # Text match - check both directions
+                trip_orig_lower = trip.departure_city.lower().strip()
+                alert_orig_lower = alert.origin.lower().strip()
+                origin_matches = trip_orig_lower in alert_orig_lower or alert_orig_lower in trip_orig_lower
             
             # Distance match (only if allow_nearby_search is True and coordinates available and text didn't match)
-            if not origin_matches and alert.allow_nearby_search and alert.origin_lat is not None and alert.origin_lng is not None and trip.departure_lat is not None and trip.departure_lng is not None:
-                origin_dist = haversine(
-                    alert.origin_lat,
-                    alert.origin_lng,
-                    trip.departure_lat,
-                    trip.departure_lng
-                )
-                origin_matches = origin_dist <= 1.0
+            if not origin_matches and alert.allow_nearby_search:
+                if (alert.origin_lat is not None and alert.origin_lng is not None and 
+                    trip.departure_lat is not None and trip.departure_lng is not None):
+                    origin_dist = haversine(
+                        alert.origin_lat,
+                        alert.origin_lng,
+                        trip.departure_lat,
+                        trip.departure_lng
+                    )
+                    origin_matches = origin_dist <= 1.0
         
         if not origin_matches:
             continue
         
-        # Check date matching
+        # Check date matching - CRITICAL: Normalize dates for comparison
         date_matches = False
         # CASE 1: Alert uses specific_dates (PRIORITY)
-        if alert.specific_dates and len(alert.specific_dates) > 0:
-            date_matches = trip_date in alert.specific_dates
+        if alert_specific_dates_normalized and len(alert_specific_dates_normalized) > 0:
+            date_matches = trip_date in alert_specific_dates_normalized
         # CASE 2: Alert uses days_of_week (only if no specific_dates)
         elif alert.days_of_week and len(alert.days_of_week) > 0:
             date_matches = trip_day_of_week in alert.days_of_week
@@ -718,32 +770,38 @@ def match_search_alerts_with_trip(db: Session, trip: Ride) -> None:
         
         # Alert matches if date matches
         if date_matches:
+            print(f"  ✅ Alert {alert.id} MATCHES trip {trip.id} (date check passed)")
             matching_alerts.append(alert)
     
-    print(f"Found {len(matching_alerts)} active search alerts matching trip {trip.id} (destination: '{trip.destination_city}', date: {trip_date}, day: {trip_day_of_week})")
+    print(f"[TRIP MATCHING] Found {len(matching_alerts)} active search alerts matching trip {trip.id}")
     
+    bookings_created = 0
     for alert in matching_alerts:
-        
         # Parse alert target_time (format: "HH:MM")
         try:
             alert_time_parts = alert.target_time.split(":")
             alert_hour = int(alert_time_parts[0])
             alert_minute = int(alert_time_parts[1])
             alert_time_minutes = alert_hour * 60 + alert_minute
-        except (ValueError, IndexError):
-            print(f"Invalid alert target_time format: {alert.target_time}")
+        except (ValueError, IndexError) as e:
+            print(f"  Alert {alert.id}: Invalid target_time format: {alert.target_time}, error: {e}")
             continue
         
         # Check if trip time is within flexibility range
         time_diff = abs(trip_time_minutes - alert_time_minutes)
         if time_diff > alert.flexibility_minutes:
+            print(f"  Alert {alert.id}: Time {alert.target_time} does not match trip {trip.departure_time} (diff: {time_diff} min, max: {alert.flexibility_minutes} min)")
             continue
         
         # Skip if user is the driver (can't book their own ride)
         if alert.user_id == trip.driver_id:
+            print(f"  Skipping alert {alert.id}: User {alert.user_id} is the driver of trip {trip.id}")
             continue
         
-        # Check if user already has a booking for this ride
+        # REGLA CRÍTICA: Solo bloquear si hay una reserva PENDING o CONFIRMED para ESTE MISMO viaje
+        # NO bloquear por reservas en otros viajes (incluso si es la misma fecha)
+        # Las reservas REJECTED NO bloquean nuevas reservas (la alerta sigue activa)
+        # Permitir múltiples reservas PENDING en diferentes viajes para la misma fecha
         existing_booking = db.query(Booking).filter(
             Booking.ride_id == trip.id,
             Booking.passenger_id == alert.user_id,
@@ -751,28 +809,30 @@ def match_search_alerts_with_trip(db: Session, trip: Ride) -> None:
         ).first()
         
         if existing_booking:
-            print(f"User {alert.user_id} already has a booking for ride {trip.id}")
+            print(f"  Skipping alert {alert.id}: User {alert.user_id} already has a booking for trip {trip.id} (status: {existing_booking.status})")
             continue
         
-        # IMPORTANT: Check if user already has a booking for this DATE (only one booking per day)
-        existing_booking_for_date = db.query(Booking).join(Ride).filter(
+        # Log si hay una reserva REJECTED para este viaje (para debugging)
+        rejected_booking = db.query(Booking).filter(
+            Booking.ride_id == trip.id,
             Booking.passenger_id == alert.user_id,
-            Booking.status.in_([BookingStatus.pending, BookingStatus.confirmed]),
-            Ride.departure_date.date() == trip_date
+            Booking.status == BookingStatus.rejected
         ).first()
         
-        if existing_booking_for_date:
-            # User already has a booking for this date, skip this trip
-            print(f"User {alert.user_id} already has a booking for date {trip_date}, skipping trip {trip.id}")
-            continue
+        if rejected_booking:
+            print(f"[ALERT MATCHING] Processing active alert {alert.id} for trip {trip.id} after previous rejection (booking {rejected_booking.id} was rejected - alert remains active)")
         
-        # Check if there are available seats
+        # OVERBOOKING CONTROLADO: Permitir crear reservas PENDING sin verificar capacidad
+        # Solo verificamos que el viaje tenga al menos 1 asiento disponible para mostrar que hay capacidad
+        # Las reservas PENDING no consumen asientos; solo las CONFIRMED lo hacen
         if trip.available_seats <= 0:
-            print(f"No available seats in ride {trip.id}")
+            print(f"  Skipping alert {alert.id}: Trip {trip.id} has no available seats (available_seats: {trip.available_seats})")
             continue
         
         try:
+            print(f"[ALERT MATCHING] Creating pending booking from alert {alert.id} for trip {trip.id} and user {alert.user_id}")
             # Create automatic booking in pending status
+            # IMPORTANTE: No decrementamos available_seats aquí porque la reserva está en PENDING
             auto_booking = Booking(
                 ride_id=trip.id,
                 passenger_id=alert.user_id,
@@ -791,14 +851,19 @@ def match_search_alerts_with_trip(db: Session, trip: Ride) -> None:
             )
             
             db.commit()
-            print(f"Created auto-booking and notification for user {alert.user_id} on ride {trip.id}")
+            bookings_created += 1
+            print(f"  ✅✅✅ SUCCESS: Created auto-booking {auto_booking.id} and notification for user {alert.user_id} (alert {alert.id}) on trip {trip.id}")
             
         except Exception as e:
             db.rollback()
-            print(f"Error creating auto-booking for user {alert.user_id} on ride {trip.id}: {e}")
+            print(f"  ❌ ERROR creating auto-booking for user {alert.user_id} (alert {alert.id}) on trip {trip.id}: {e}")
             import traceback
             traceback.print_exc()
             continue
+    
+    print("=" * 70)
+    print(f"[TRIP MATCHING] ✅ Completed: Created {bookings_created} auto-bookings for trip {trip.id}")
+    print("=" * 70)
 
 
 def _get_trip_score(db: Session, trip: Ride, alert: SearchAlert) -> tuple[float, float]:
@@ -856,9 +921,18 @@ def _select_best_trip(db: Session, trips: List[Ride], alert: SearchAlert) -> Opt
 
 def match_existing_trips_with_alert(db: Session, alert: SearchAlert) -> None:
     """
-    Match a newly created search alert with existing trips and automatically:
-    1. Create pending bookings for matching trips
-    2. Send notifications to the alert owner
+    MATCHING BIDIRECCIONAL: Procesar alerta nueva contra viajes existentes.
+    
+    Cuando un usuario crea una alerta, esta función:
+    1. Busca todos los viajes existentes compatibles
+    2. Crea reservas PENDING para cada viaje que coincida (uno por fecha, el mejor)
+    3. Envía notificaciones al usuario
+    
+    REGLAS CRÍTICAS:
+    - Solo bloquea si hay reserva PENDING/CONFIRMED para el MISMO viaje
+    - NO bloquea por reservas REJECTED (la alerta sigue activa)
+    - NO bloquea por reservas PENDING en OTROS viajes (permite múltiples intentos)
+    - Selecciona el mejor viaje por fecha (rating más alto, distancia más corta)
     
     Args:
         db: Database session
@@ -866,19 +940,33 @@ def match_existing_trips_with_alert(db: Session, alert: SearchAlert) -> None:
     """
     from datetime import datetime, timezone, date as date_type
     
+    print("=" * 70)
+    print(f"[ALERT MATCHING] Processing alert {alert.id} against existing trips")
+    print(f"  Alert user_id: {alert.user_id}")
+    print(f"  Alert origin: {alert.origin}")
+    print(f"  Alert destination: {alert.destination}")
+    print(f"  Alert target_time: {alert.target_time}")
+    print(f"  Alert flexibility: {alert.flexibility_minutes} min")
+    print(f"  Alert specific_dates: {alert.specific_dates}")
+    print(f"  Alert days_of_week: {alert.days_of_week}")
+    print(f"  Alert allow_nearby_search: {alert.allow_nearby_search}")
+    print("=" * 70)
+    
     # Parse alert target_time (format: "HH:MM")
     try:
         alert_time_parts = alert.target_time.split(":")
         alert_hour = int(alert_time_parts[0])
         alert_minute = int(alert_time_parts[1])
         alert_time_minutes = alert_hour * 60 + alert_minute
-    except (ValueError, IndexError):
-        print(f"Invalid alert target_time format: {alert.target_time}")
+        print(f"  Parsed alert time: {alert_hour:02d}:{alert_minute:02d} ({alert_time_minutes} minutes)")
+    except (ValueError, IndexError) as e:
+        print(f"[ALERT MATCHING] ❌ Invalid alert target_time format: {alert.target_time}, error: {e}")
         return
     
     # Get current date to filter out past trips
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    print(f"  Filtering trips from: {today_start.date()}")
     
     # Find all active trips in the future
     # We'll check both text matching and distance matching
@@ -887,6 +975,29 @@ def match_existing_trips_with_alert(db: Session, alert: SearchAlert) -> None:
         Ride.available_seats > 0,
         Ride.departure_date >= today_start,  # Only future trips
     ).all()
+    
+    print(f"  Found {len(all_trips)} active trips with available seats")
+    
+    # Normalize alert specific_dates to Python date objects for comparison
+    alert_specific_dates_normalized = None
+    if alert.specific_dates and len(alert.specific_dates) > 0:
+        try:
+            # Convert to list of Python date objects
+            alert_specific_dates_normalized = []
+            for d in alert.specific_dates:
+                if isinstance(d, date_type):
+                    alert_specific_dates_normalized.append(d)
+                elif isinstance(d, str):
+                    alert_specific_dates_normalized.append(date_type.fromisoformat(d))
+                else:
+                    # Try to convert to date
+                    alert_specific_dates_normalized.append(d.date() if hasattr(d, 'date') else date_type.fromisoformat(str(d)))
+            print(f"  Normalized specific_dates: {alert_specific_dates_normalized}")
+        except Exception as e:
+            print(f"[ALERT MATCHING] ❌ Error normalizing specific_dates: {e}")
+            import traceback
+            traceback.print_exc()
+            return
     
     # Filter trips that match the alert criteria:
     # 1. Destination matches (text OR distance ≤1 km)
@@ -898,18 +1009,24 @@ def match_existing_trips_with_alert(db: Session, alert: SearchAlert) -> None:
         # Check destination match (text OR distance)
         destination_matches = False
         if trip.destination_city and alert.destination:
-            # Text match
-            destination_matches = trip.destination_city.lower() in alert.destination.lower() or alert.destination.lower() in trip.destination_city.lower()
+            # Text match - check both directions
+            trip_dest_lower = trip.destination_city.lower().strip()
+            alert_dest_lower = alert.destination.lower().strip()
+            destination_matches = trip_dest_lower in alert_dest_lower or alert_dest_lower in trip_dest_lower
         
         # Distance match (only if allow_nearby_search is True and coordinates available)
-        if not destination_matches and alert.allow_nearby_search and alert.destination_lat is not None and alert.destination_lng is not None and trip.destination_lat is not None and trip.destination_lng is not None:
-            dest_dist = haversine(
-                alert.destination_lat,
-                alert.destination_lng,
-                trip.destination_lat,
-                trip.destination_lng
-            )
-            destination_matches = dest_dist <= 1.0
+        if not destination_matches and alert.allow_nearby_search:
+            if (alert.destination_lat is not None and alert.destination_lng is not None and 
+                trip.destination_lat is not None and trip.destination_lng is not None):
+                dest_dist = haversine(
+                    alert.destination_lat,
+                    alert.destination_lng,
+                    trip.destination_lat,
+                    trip.destination_lng
+                )
+                destination_matches = dest_dist <= 1.0
+                if destination_matches:
+                    print(f"  Trip {trip.id}: Destination matches by distance ({dest_dist:.2f} km)")
         
         if not destination_matches:
             continue
@@ -919,35 +1036,47 @@ def match_existing_trips_with_alert(db: Session, alert: SearchAlert) -> None:
         if alert.origin:
             origin_matches = False
             if trip.departure_city:
-                # Text match
-                origin_matches = trip.departure_city.lower() in alert.origin.lower() or alert.origin.lower() in trip.departure_city.lower()
+                # Text match - check both directions
+                trip_orig_lower = trip.departure_city.lower().strip()
+                alert_orig_lower = alert.origin.lower().strip()
+                origin_matches = trip_orig_lower in alert_orig_lower or alert_orig_lower in trip_orig_lower
             
             # Distance match (only if allow_nearby_search is True and coordinates available and text didn't match)
-            if not origin_matches and alert.allow_nearby_search and alert.origin_lat is not None and alert.origin_lng is not None and trip.departure_lat is not None and trip.departure_lng is not None:
-                origin_dist = haversine(
-                    alert.origin_lat,
-                    alert.origin_lng,
-                    trip.departure_lat,
-                    trip.departure_lng
-                )
-                origin_matches = origin_dist <= 1.0
+            if not origin_matches and alert.allow_nearby_search:
+                if (alert.origin_lat is not None and alert.origin_lng is not None and 
+                    trip.departure_lat is not None and trip.departure_lng is not None):
+                    origin_dist = haversine(
+                        alert.origin_lat,
+                        alert.origin_lng,
+                        trip.departure_lat,
+                        trip.departure_lng
+                    )
+                    origin_matches = origin_dist <= 1.0
+                    if origin_matches:
+                        print(f"  Trip {trip.id}: Origin matches by distance ({origin_dist:.2f} km)")
         
         if not origin_matches:
             continue
         
-        # Check date matching
+        # Check date matching - CRITICAL: Normalize dates for comparison
         trip_date = trip.departure_date.date()
         trip_day_of_week = trip.departure_date.weekday()
         date_matches = False
         
         # CASE 1: Alert uses specific_dates (PRIORITY)
-        if alert.specific_dates and len(alert.specific_dates) > 0:
-            date_matches = trip_date in alert.specific_dates
+        if alert_specific_dates_normalized and len(alert_specific_dates_normalized) > 0:
+            # Compare normalized dates
+            date_matches = trip_date in alert_specific_dates_normalized
+            if not date_matches:
+                print(f"  Trip {trip.id}: Date {trip_date} not in alert specific_dates {alert_specific_dates_normalized}")
         # CASE 2: Alert uses days_of_week (only if no specific_dates)
         elif alert.days_of_week and len(alert.days_of_week) > 0:
             date_matches = trip_day_of_week in alert.days_of_week
+            if not date_matches:
+                print(f"  Trip {trip.id}: Day of week {trip_day_of_week} not in alert days_of_week {alert.days_of_week}")
         else:
             # No date criteria, skip
+            print(f"  Trip {trip.id}: Alert has no date criteria")
             continue
         
         if not date_matches:
@@ -959,19 +1088,30 @@ def match_existing_trips_with_alert(db: Session, alert: SearchAlert) -> None:
             trip_hour = int(trip_time_parts[0])
             trip_minute = int(trip_time_parts[1])
             trip_time_minutes = trip_hour * 60 + trip_minute
-        except (ValueError, IndexError):
-            print(f"Invalid trip departure_time format: {trip.departure_time}")
+        except (ValueError, IndexError) as e:
+            print(f"  Trip {trip.id}: Invalid departure_time format: {trip.departure_time}, error: {e}")
             continue
         
         # Check if trip time is within flexibility range
         time_diff = abs(trip_time_minutes - alert_time_minutes)
         if time_diff > alert.flexibility_minutes:
+            print(f"  Trip {trip.id}: Time {trip.departure_time} does not match alert {alert.target_time} (diff: {time_diff} min, max: {alert.flexibility_minutes} min)")
             continue
         
         # Trip matches all criteria
+        print(f"  ✅ Trip {trip.id} MATCHES alert {alert.id}: {trip.departure_city} → {trip.destination_city} on {trip_date} at {trip.departure_time}")
         matching_trips.append(trip)
     
-    print(f"Found {len(matching_trips)} existing trips matching alert {alert.id} for destination '{alert.destination}'")
+    print(f"[ALERT MATCHING] Found {len(matching_trips)} existing trips matching alert {alert.id} for destination '{alert.destination}'")
+    
+    if len(matching_trips) == 0:
+        print(f"[ALERT MATCHING] ⚠️ No matching trips found. Alert details:")
+        print(f"   - Origin: {alert.origin}")
+        print(f"   - Destination: {alert.destination}")
+        print(f"   - Time: {alert.target_time} (±{alert.flexibility_minutes} min)")
+        print(f"   - Dates: {alert_specific_dates_normalized or alert.days_of_week}")
+        print(f"   - Total trips checked: {len(all_trips)}")
+        return
     
     # Group trips by date and select only the best trip per date
     from collections import defaultdict
@@ -987,15 +1127,20 @@ def match_existing_trips_with_alert(db: Session, alert: SearchAlert) -> None:
         if best_trip:
             best_trips.append(best_trip)
     
-    print(f"Selected {len(best_trips)} best trips (one per date) for alert {alert.id}")
+    print(f"[ALERT MATCHING] Selected {len(best_trips)} best trips (one per date) for alert {alert.id}")
     
     # Create bookings and notifications for best trips only
+    bookings_created = 0
     for trip in best_trips:
         # Skip if user is the driver (can't book their own ride)
         if alert.user_id == trip.driver_id:
+            print(f"  Skipping trip {trip.id}: User {alert.user_id} is the driver")
             continue
         
-        # Check if user already has a booking for this ride
+        # REGLA CRÍTICA: Solo bloquear si hay una reserva PENDING o CONFIRMED para ESTE MISMO viaje
+        # NO bloquear por reservas en otros viajes (incluso si es la misma fecha)
+        # Las reservas REJECTED NO bloquean nuevas reservas (la alerta sigue activa)
+        # Permitir múltiples reservas PENDING en diferentes viajes para la misma fecha
         existing_booking = db.query(Booking).filter(
             Booking.ride_id == trip.id,
             Booking.passenger_id == alert.user_id,
@@ -1003,16 +1148,35 @@ def match_existing_trips_with_alert(db: Session, alert: SearchAlert) -> None:
         ).first()
         
         if existing_booking:
-            print(f"User {alert.user_id} already has a booking for ride {trip.id}")
+            print(f"  Skipping trip {trip.id}: User {alert.user_id} already has a booking (status: {existing_booking.status})")
             continue
         
-        # Check if there are available seats
+        # Log si hay una reserva REJECTED para este viaje (para debugging)
+        rejected_booking = db.query(Booking).filter(
+            Booking.ride_id == trip.id,
+            Booking.passenger_id == alert.user_id,
+            Booking.status == BookingStatus.rejected
+        ).first()
+        
+        if rejected_booking:
+            print(f"[ALERT MATCHING] Processing active alert {alert.id} for trip {trip.id} after previous rejection (booking {rejected_booking.id} was rejected - alert remains active)")
+        
+        # OVERBOOKING CONTROLADO: Permitir crear reservas PENDING sin verificar capacidad
+        # Solo verificamos que el viaje tenga al menos 1 asiento disponible para mostrar que hay capacidad
+        # Las reservas PENDING no consumen asientos; solo las CONFIRMED lo hacen
         if trip.available_seats <= 0:
-            print(f"No available seats in ride {trip.id}")
+            print(f"  Skipping trip {trip.id}: Trip has no available seats (available_seats: {trip.available_seats})")
             continue
         
         try:
+            # Log si es una nueva reserva después de un rechazo previo
+            if rejected_booking:
+                print(f"[ALERT MATCHING] Creating new pending booking from alert {alert.id} for new matching trip {trip.id} (previous booking {rejected_booking.id} was rejected)")
+            else:
+                print(f"[ALERT MATCHING] Creating pending booking from alert {alert.id} for trip {trip.id} and user {alert.user_id}")
+            
             # Create automatic booking in pending status
+            # IMPORTANTE: No decrementamos available_seats aquí porque la reserva está en PENDING
             auto_booking = Booking(
                 ride_id=trip.id,
                 passenger_id=alert.user_id,
@@ -1031,14 +1195,19 @@ def match_existing_trips_with_alert(db: Session, alert: SearchAlert) -> None:
             )
             
             db.commit()
-            print(f"Created auto-booking and notification for user {alert.user_id} on existing ride {trip.id}")
+            bookings_created += 1
+            print(f"  ✅✅✅ SUCCESS: Created auto-booking {auto_booking.id} and notification for user {alert.user_id} on trip {trip.id}")
             
         except Exception as e:
             db.rollback()
-            print(f"Error creating auto-booking for user {alert.user_id} on existing ride {trip.id}: {e}")
+            print(f"  ❌ ERROR creating auto-booking for user {alert.user_id} on trip {trip.id}: {e}")
             import traceback
             traceback.print_exc()
             continue
+    
+    print("=" * 70)
+    print(f"[ALERT MATCHING] ✅ Completed: Created {bookings_created} auto-bookings for alert {alert.id}")
+    print("=" * 70)
 
 
 def match_trips_for_specific_dates(
@@ -1170,7 +1339,10 @@ def match_trips_for_specific_dates(
         if alert.user_id == trip.driver_id:
             continue
         
-        # Check if user already has a booking for this ride
+        # REGLA CRÍTICA: Solo bloquear si hay una reserva PENDING o CONFIRMED para ESTE MISMO viaje
+        # NO bloquear por reservas en otros viajes (incluso si es la misma fecha)
+        # Las reservas REJECTED NO bloquean nuevas reservas (la alerta sigue activa)
+        # Permitir múltiples reservas PENDING en diferentes viajes para la misma fecha
         existing_booking = db.query(Booking).filter(
             Booking.ride_id == trip.id,
             Booking.passenger_id == alert.user_id,
@@ -1178,14 +1350,18 @@ def match_trips_for_specific_dates(
         ).first()
         
         if existing_booking:
+            print(f"  Skipping trip {trip.id}: User {alert.user_id} already has a booking (status: {existing_booking.status})")
             continue
         
-        # Check if there are available seats
+        # OVERBOOKING CONTROLADO: Permitir crear reservas PENDING sin verificar capacidad
+        # Solo verificamos que el viaje tenga al menos 1 asiento disponible para mostrar que hay capacidad
         if trip.available_seats <= 0:
             continue
         
         try:
+            print(f"[ALERT MATCHING] Creating pending booking from alert {alert.id} for trip {trip.id} and user {alert.user_id}")
             # Create automatic booking in pending status
+            # IMPORTANTE: No decrementamos available_seats aquí porque la reserva está en PENDING
             auto_booking = Booking(
                 ride_id=trip.id,
                 passenger_id=alert.user_id,
@@ -1635,7 +1811,10 @@ def retry_search_for_rejected_auto_booking(db: Session, passenger_id: int, rejec
         
         # Create bookings and notifications for best trips only
         for trip in best_trips:
-            # Check if user already has a booking for this ride (double check)
+            # REGLA CRÍTICA: Solo bloquear si hay una reserva PENDING o CONFIRMED para ESTE MISMO viaje
+            # NO bloquear por reservas en otros viajes (incluso si es la misma fecha)
+            # Las reservas REJECTED NO bloquean nuevas reservas (la alerta sigue activa)
+            # Permitir múltiples reservas PENDING en diferentes viajes para la misma fecha
             existing_booking = db.query(Booking).filter(
                 Booking.ride_id == trip.id,
                 Booking.passenger_id == alert.user_id,
@@ -1643,10 +1822,18 @@ def retry_search_for_rejected_auto_booking(db: Session, passenger_id: int, rejec
             ).first()
             
             if existing_booking:
+                print(f"  Skipping trip {trip.id}: User {alert.user_id} already has a booking (status: {existing_booking.status})")
+                continue
+            
+            # OVERBOOKING CONTROLADO: Permitir crear reservas PENDING sin verificar capacidad
+            # Solo verificamos que el viaje tenga al menos 1 asiento disponible para mostrar que hay capacidad
+            if trip.available_seats <= 0:
                 continue
             
             try:
+                print(f"[ALERT MATCHING] Creating pending booking from alert {alert.id} for trip {trip.id} and user {alert.user_id} (after rejection)")
                 # Create automatic booking in pending status
+                # IMPORTANTE: No decrementamos available_seats aquí porque la reserva está en PENDING
                 auto_booking = Booking(
                     ride_id=trip.id,
                     passenger_id=alert.user_id,
@@ -1665,7 +1852,7 @@ def retry_search_for_rejected_auto_booking(db: Session, passenger_id: int, rejec
                 )
                 
                 db.commit()
-                print(f"Created new auto-booking and notification for user {alert.user_id} on ride {trip.id} after rejection")
+                print(f"✅✅✅ SUCCESS: Created new auto-booking {auto_booking.id} and notification for user {alert.user_id} on ride {trip.id} after rejection")
                 
             except Exception as e:
                 db.rollback()

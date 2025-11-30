@@ -1,4 +1,10 @@
 # backend/app/core/mailer.py
+"""
+DEPRECATED: This module is kept for backward compatibility.
+New code should use app.core.email.EmailService instead.
+
+This module will be removed in a future version.
+"""
 import logging
 import os
 import smtplib
@@ -13,6 +19,8 @@ MAIL_FROM = os.getenv("MAIL_FROM", "no-reply@unigo.local")
 
 def send_verification_email(*, to_email: str, code: str) -> None:
     """
+    DEPRECATED: Use app.core.email.send_verification_email instead.
+    
     Envía el código de verificación.
     Requiere 'code' no vacío; NO tiene default para evitar code=None por error.
     """

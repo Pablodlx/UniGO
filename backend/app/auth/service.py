@@ -268,7 +268,11 @@ def verify_email(db: Session, email: str, code: str) -> str:
     if rec.expires_at < now:
         raise HTTPException(status_code=400, detail="Código de verificación caducado")
 
-    if code != rec.code:
+    # Normalize code (strip whitespace, ensure 6 digits)
+    normalized_code = code.strip()
+    normalized_db_code = rec.code.strip()
+    
+    if normalized_code != normalized_db_code:
         rec.attempts += 1
         db.commit()
         raise HTTPException(status_code=400, detail="Código de verificación inválido")
