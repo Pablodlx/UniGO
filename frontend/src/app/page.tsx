@@ -590,17 +590,36 @@ export default function Home() {
                       pero encontramos algunos cerca de ti:
                     </p>
                   </div>
-                  {searchResults.nearby_matches.map((ride) => (
-                    <div key={ride.id} className="relative">
-                      <RideCard 
-                        ride={ride} 
-                        onClick={() => handleRideClick(ride)}
-                      />
-                      <span className="absolute top-4 right-4 z-10 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full font-medium shadow-sm">
-                        ✨ Cerca de ti (a {Math.round(ride.origin_distance_km * 1000)} m)
-                      </span>
-                    </div>
-                  ))}
+                  {searchResults.nearby_matches.map((ride) => {
+                    const originDistM = Math.round((ride.origin_distance_km || 0) * 1000);
+                    const destDistM = Math.round((ride.destination_distance_km || 0) * 1000);
+                    
+                    // Build distance text based on which distances are different
+                    let distanceText = "";
+                    if (originDistM === 0 && destDistM === 0) {
+                      distanceText = "a 0 m";
+                    } else if (originDistM === 0 && destDistM > 0) {
+                      distanceText = `destino a ${destDistM} m`;
+                    } else if (originDistM > 0 && destDistM === 0) {
+                      distanceText = `origen a ${originDistM} m`;
+                    } else if (originDistM === destDistM) {
+                      distanceText = `a ${originDistM} m`;
+                    } else {
+                      distanceText = `origen a ${originDistM} m, destino a ${destDistM} m`;
+                    }
+                    
+                    return (
+                      <div key={ride.id} className="relative">
+                        <RideCard 
+                          ride={ride} 
+                          onClick={() => handleRideClick(ride)}
+                        />
+                        <span className="absolute top-4 right-4 z-10 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full font-medium shadow-sm">
+                          ✨ Cerca de ti ({distanceText})
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="bg-white rounded-xl shadow-md p-8 text-center">

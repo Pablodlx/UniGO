@@ -727,6 +727,453 @@ Si no has solicitado restablecer tu contraseña, puedes ignorar este correo.
 
         return await self._send_email(email, subject, html_body, text_body)
 
+    def _get_passenger_cancellation_email_html(
+        self,
+        driver_name: str,
+        passenger_name: str,
+        departure_city: str,
+        destination_city: str,
+        departure_date: str,
+        departure_time: str,
+    ) -> str:
+        """Generate HTML template for passenger cancellation email."""
+        return f"""
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reserva cancelada - UniGO</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }}
+        .container {{
+            background-color: #ffffff;
+            border-radius: 8px;
+            padding: 40px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        .header {{
+            text-align: center;
+            margin-bottom: 30px;
+        }}
+        .logo {{
+            font-size: 32px;
+            font-weight: bold;
+            color: #ef4444;
+            margin-bottom: 10px;
+        }}
+        .warning-badge {{
+            background-color: #fef3c7;
+            color: #92400e;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+            display: inline-block;
+            margin-bottom: 20px;
+        }}
+        .trip-details {{
+            background-color: #f9fafb;
+            border-radius: 8px;
+            padding: 24px;
+            margin: 24px 0;
+        }}
+        .detail-row {{
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }}
+        .detail-row:last-child {{
+            border-bottom: none;
+        }}
+        .detail-label {{
+            font-weight: 600;
+            color: #6b7280;
+        }}
+        .detail-value {{
+            color: #111827;
+            text-align: right;
+        }}
+        .footer {{
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            text-align: center;
+            color: #999;
+            font-size: 12px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">🎓 UniGO</div>
+            <div class="warning-badge">⚠️ Reserva Cancelada</div>
+            <h1 style="color: #333; margin: 20px 0 10px 0;">Un pasajero ha cancelado su reserva</h1>
+        </div>
+        
+        <p>Hola <strong>{driver_name}</strong>,</p>
+        
+        <p>Te informamos que <strong>{passenger_name}</strong> ha cancelado su reserva para el siguiente viaje:</p>
+        
+        <div class="trip-details">
+            <div class="detail-row">
+                <span class="detail-label">📍 Origen:</span>
+                <span class="detail-value"><strong>{departure_city}</strong></span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">🎯 Destino:</span>
+                <span class="detail-value"><strong>{destination_city}</strong></span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">📅 Fecha:</span>
+                <span class="detail-value">{departure_date}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">🕐 Hora:</span>
+                <span class="detail-value">{departure_time}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">👤 Pasajero:</span>
+                <span class="detail-value">{passenger_name}</span>
+            </div>
+        </div>
+        
+        <p style="margin-top: 24px;">
+            <strong>Información importante:</strong><br>
+            • Los asientos de esta reserva han sido liberados y están disponibles nuevamente.<br>
+            • Puedes ver todos los detalles del viaje y gestionar tus reservas desde la aplicación.<br>
+            • Si tienes otras reservas pendientes, puedes aceptarlas ahora.
+        </p>
+        
+        <div class="footer">
+            <p>© 2025 UniGO - Carpooling universitario</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+    def _get_trip_confirmed_email_html(
+        self,
+        passenger_name: str,
+        driver_name: str,
+        departure_city: str,
+        destination_city: str,
+        departure_date: str,
+        departure_time: str,
+        meeting_point: Optional[str],
+        seats: int,
+        trip_url: str,
+    ) -> str:
+        """Generate HTML template for trip confirmed email."""
+        meeting_point_text = meeting_point if meeting_point else "Se acordará con el conductor"
+        
+        return f"""
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Viaje confirmado - UniGO</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }}
+        .container {{
+            background-color: #ffffff;
+            border-radius: 8px;
+            padding: 40px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        .header {{
+            text-align: center;
+            margin-bottom: 30px;
+        }}
+        .logo {{
+            font-size: 32px;
+            font-weight: bold;
+            color: #22c55e;
+            margin-bottom: 10px;
+        }}
+        .success-badge {{
+            background-color: #22c55e;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+            display: inline-block;
+            margin-bottom: 20px;
+        }}
+        .trip-details {{
+            background-color: #f9fafb;
+            border-radius: 8px;
+            padding: 24px;
+            margin: 24px 0;
+        }}
+        .detail-row {{
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }}
+        .detail-row:last-child {{
+            border-bottom: none;
+        }}
+        .detail-label {{
+            font-weight: 600;
+            color: #6b7280;
+        }}
+        .detail-value {{
+            color: #111827;
+            text-align: right;
+        }}
+        .footer {{
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            text-align: center;
+            color: #999;
+            font-size: 12px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">🎓 UniGO</div>
+            <div class="success-badge">✅ Viaje Confirmado</div>
+            <h1 style="color: #333; margin: 20px 0 10px 0;">¡Tu viaje ha sido confirmado!</h1>
+        </div>
+        
+        <p>Hola <strong>{passenger_name}</strong>,</p>
+        
+        <p>¡Excelente noticia! El conductor <strong>{driver_name}</strong> ha confirmado tu reserva para el siguiente viaje:</p>
+        
+        <div class="trip-details">
+            <div class="detail-row">
+                <span class="detail-label">📍 Origen:</span>
+                <span class="detail-value"><strong>{departure_city}</strong></span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">🎯 Destino:</span>
+                <span class="detail-value"><strong>{destination_city}</strong></span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">📅 Fecha:</span>
+                <span class="detail-value">{departure_date}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">🕐 Hora:</span>
+                <span class="detail-value">{departure_time}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">👤 Conductor:</span>
+                <span class="detail-value">{driver_name}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">💺 Plazas reservadas:</span>
+                <span class="detail-value">{seats} {('plaza' if seats == 1 else 'plazas')}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">📍 Punto de encuentro:</span>
+                <span class="detail-value">{meeting_point_text}</span>
+            </div>
+        </div>
+        
+        <p style="margin-top: 24px;">
+            <strong>Próximos pasos:</strong><br>
+            • El conductor se pondrá en contacto contigo si necesita coordinar el punto de encuentro.<br>
+            • Puedes ver todos los detalles del viaje y contactar con el conductor desde la aplicación.<br>
+            • ¡Disfruta de tu viaje!
+        </p>
+        
+        <div class="footer">
+            <p>© 2025 UniGO - Carpooling universitario</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+    async def send_trip_confirmed_email(
+        self,
+        to_email: str,
+        passenger_name: str,
+        driver_name: str,
+        departure_city: str,
+        destination_city: str,
+        departure_date: str,
+        departure_time: str,
+        meeting_point: Optional[str],
+        seats: int,
+        trip_id: int,
+    ) -> bool:
+        """
+        Send trip confirmed email to passenger.
+
+        Args:
+            to_email: Passenger email address
+            passenger_name: Passenger full name
+            driver_name: Driver full name
+            departure_city: Trip origin city
+            destination_city: Trip destination city
+            departure_date: Trip departure date (formatted string)
+            departure_time: Trip departure time (HH:MM format)
+            meeting_point: Optional meeting point
+            seats: Number of seats reserved
+            trip_id: Trip ID for the URL
+
+        Returns:
+            True if email was sent successfully, False otherwise
+        """
+        log.info(f"[EmailService] send_trip_confirmed_email called for {to_email} (trip {trip_id})")
+        
+        try:
+            frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:3001")
+            trip_url = f"{frontend_url}/my-rides?trip={trip_id}"
+            
+            subject = "UniGO – Tu viaje ha sido confirmado ✅"
+            html_body = self._get_trip_confirmed_email_html(
+                passenger_name=passenger_name,
+                driver_name=driver_name,
+                departure_city=departure_city,
+                destination_city=destination_city,
+                departure_date=departure_date,
+                departure_time=departure_time,
+                meeting_point=meeting_point,
+                seats=seats,
+                trip_url=trip_url,
+            )
+            text_body = f"""UniGO – Tu viaje ha sido confirmado ✅
+
+Hola {passenger_name},
+
+¡Excelente noticia! El conductor {driver_name} ha confirmado tu reserva para el siguiente viaje:
+
+📍 Origen: {departure_city}
+🎯 Destino: {destination_city}
+📅 Fecha: {departure_date}
+🕐 Hora: {departure_time}
+👤 Conductor: {driver_name}
+💺 Plazas reservadas: {seats} {('plaza' if seats == 1 else 'plazas')}
+📍 Punto de encuentro: {meeting_point if meeting_point else 'Se acordará con el conductor'}
+
+Próximos pasos:
+• El conductor se pondrá en contacto contigo si necesita coordinar el punto de encuentro.
+• Puedes ver todos los detalles del viaje y contactar con el conductor desde la aplicación.
+• ¡Disfruta de tu viaje!
+
+© 2025 UniGO - Carpooling universitario
+"""
+
+            log.info(f"[EmailService] Calling _send_email for trip confirmation to {to_email}")
+            result = await self._send_email(to_email, subject, html_body, text_body)
+            
+            if result:
+                log.info(f"[EmailService] ✅ Trip confirmation email sent successfully to {to_email}")
+            else:
+                log.error(f"[EmailService] ❌ Failed to send trip confirmation email to {to_email}")
+            
+            return result
+        except Exception as e:
+            log.error(
+                f"[EmailService] ❌ Exception sending trip confirmation email to {to_email}: {str(e)}",
+                exc_info=True
+            )
+            return False
+
+    async def send_passenger_cancellation_email(
+        self,
+        to_email: str,
+        driver_name: str,
+        passenger_name: str,
+        departure_city: str,
+        destination_city: str,
+        departure_date: str,
+        departure_time: str,
+        trip_id: int,
+    ) -> bool:
+        """
+        Send passenger cancellation email to driver.
+
+        Args:
+            to_email: Driver email address
+            driver_name: Driver full name
+            passenger_name: Passenger full name who cancelled
+            departure_city: Trip origin city
+            destination_city: Trip destination city
+            departure_date: Trip departure date (formatted string)
+            departure_time: Trip departure time (HH:MM format)
+            trip_id: Trip ID for reference
+
+        Returns:
+            True if email was sent successfully, False otherwise
+        """
+        log.info(f"[EmailService] send_passenger_cancellation_email called for {to_email} (trip {trip_id})")
+        
+        try:
+            subject = "UniGO – Un pasajero ha cancelado su reserva"
+            html_body = self._get_passenger_cancellation_email_html(
+                driver_name=driver_name,
+                passenger_name=passenger_name,
+                departure_city=departure_city,
+                destination_city=destination_city,
+                departure_date=departure_date,
+                departure_time=departure_time,
+            )
+            text_body = f"""UniGO – Un pasajero ha cancelado su reserva
+
+Hola {driver_name},
+
+Te informamos que {passenger_name} ha cancelado su reserva para el siguiente viaje:
+
+📍 Origen: {departure_city}
+🎯 Destino: {destination_city}
+📅 Fecha: {departure_date}
+🕐 Hora: {departure_time}
+👤 Pasajero: {passenger_name}
+
+Información importante:
+• Los asientos de esta reserva han sido liberados y están disponibles nuevamente.
+• Puedes ver todos los detalles del viaje y gestionar tus reservas desde la aplicación.
+• Si tienes otras reservas pendientes, puedes aceptarlas ahora.
+
+© 2025 UniGO - Carpooling universitario
+"""
+
+            log.info(f"[EmailService] Calling _send_email for passenger cancellation to {to_email}")
+            result = await self._send_email(to_email, subject, html_body, text_body)
+            
+            if result:
+                log.info(f"[EmailService] ✅ Passenger cancellation email sent successfully to {to_email}")
+            else:
+                log.error(f"[EmailService] ❌ Failed to send passenger cancellation email to {to_email}")
+            
+            return result
+        except Exception as e:
+            log.error(
+                f"[EmailService] ❌ Exception sending passenger cancellation email to {to_email}: {str(e)}",
+                exc_info=True
+            )
+            return False
+
 
 # Global instance
 _email_service: Optional[EmailService] = None
@@ -768,6 +1215,424 @@ async def send_verification_email(email: str, code: str) -> bool:
             exc_info=True
         )
         return False
+
+
+async def send_trip_confirmed_email(
+    to_email: str,
+    passenger_name: str,
+    driver_name: str,
+    departure_city: str,
+    destination_city: str,
+    departure_date: str,
+    departure_time: str,
+    meeting_point: Optional[str],
+    seats: int,
+    trip_id: int,
+) -> bool:
+    """
+    Send trip confirmed email (async wrapper).
+    Returns True if sent successfully, False otherwise.
+    """
+    log.info(f"[Email] send_trip_confirmed_email async called for {to_email} (trip {trip_id})")
+    
+    try:
+        service = get_email_service()
+        success = await service.send_trip_confirmed_email(
+            to_email=to_email,
+            passenger_name=passenger_name,
+            driver_name=driver_name,
+            departure_city=departure_city,
+            destination_city=destination_city,
+            departure_date=departure_date,
+            departure_time=departure_time,
+            meeting_point=meeting_point,
+            seats=seats,
+            trip_id=trip_id,
+        )
+        
+        if success:
+            log.info(f"[Email] ✅ Trip confirmation email sent successfully to {to_email}")
+        else:
+            log.warning(f"[Email] ⚠️ Failed to send trip confirmation email to {to_email}")
+        
+        return success
+    except Exception as e:
+        log.error(
+            f"[Email] ❌ Exception in send_trip_confirmed_email for {to_email}: {str(e)}",
+            exc_info=True
+        )
+        return False
+
+
+def send_passenger_cancellation_email_sync(
+    to_email: str,
+    driver_name: str,
+    passenger_name: str,
+    departure_city: str,
+    destination_city: str,
+    departure_date: str,
+    departure_time: str,
+    trip_id: int,
+) -> None:
+    """
+    Synchronous wrapper for sending passenger cancellation email.
+    SOLUCIÓN DEFINITIVA: Envío directo síncrono sin asyncio.
+    Usa EXACTAMENTE el mismo patrón que send_verification_email_sync.
+    """
+    import threading
+    import base64
+    import httpx
+    thread_name = threading.current_thread().name
+    
+    # FORZAR LOGS INMEDIATOS
+    print("=" * 70, flush=True)
+    print(f"[Email] ===== INICIANDO ENVÍO DE EMAIL DE CANCELACIÓN DE RESERVA =====", flush=True)
+    print(f"[Email] Thread: '{thread_name}'", flush=True)
+    print(f"[Email] Email: {to_email}", flush=True)
+    print(f"[Email] Trip ID: {trip_id}", flush=True)
+    print("=" * 70, flush=True)
+    
+    log.info("=" * 70)
+    log.info(f"[Email] ===== INICIANDO ENVÍO DE EMAIL DE CANCELACIÓN DE RESERVA =====")
+    log.info(f"[Email] Thread: '{thread_name}'")
+    log.info(f"[Email] Email: {to_email}")
+    log.info(f"[Email] Trip ID: {trip_id}")
+    log.info("=" * 70)
+    
+    try:
+        # Cargar configuración directamente (igual que send_verification_email_sync)
+        from dotenv import load_dotenv
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        env_path = os.path.join(backend_dir, ".env")
+        if os.path.exists(env_path):
+            load_dotenv(env_path, override=True)
+        
+        email_backend = os.getenv("EMAIL_BACKEND", "").lower().strip()
+        mailjet_api_key = os.getenv("MAILJET_API_KEY", "").strip()
+        mailjet_secret_key = os.getenv("MAILJET_SECRET_KEY", "").strip()
+        email_from = os.getenv("EMAIL_FROM", "").strip()
+        email_from_name = os.getenv("EMAIL_FROM_NAME", "UniGO")
+        
+        print(f"[Email] Configuración:", flush=True)
+        print(f"  - EMAIL_BACKEND: {email_backend}", flush=True)
+        print(f"  - MAILJET_API_KEY: {'✅' if mailjet_api_key else '❌'}", flush=True)
+        print(f"  - MAILJET_SECRET_KEY: {'✅' if mailjet_secret_key else '❌'}", flush=True)
+        print(f"  - EMAIL_FROM: {email_from}", flush=True)
+        
+        log.info(f"[Email] Configuración: backend={email_backend}, from={email_from}")
+        
+        # Si es Mailjet, enviar directamente SIN asyncio (igual que send_verification_email_sync)
+        if email_backend == "mailjet" and mailjet_api_key and mailjet_secret_key:
+            print(f"[Email] Enviando con Mailjet API (síncrono)...", flush=True)
+            log.info(f"[Email] Enviando con Mailjet API (síncrono)")
+            
+            subject = "UniGO – Un pasajero ha cancelado su reserva"
+            
+            # Generar HTML del email (usar el mismo método del servicio)
+            service = get_email_service()
+            html_body = service._get_passenger_cancellation_email_html(
+                driver_name=driver_name,
+                passenger_name=passenger_name,
+                departure_city=departure_city,
+                destination_city=destination_city,
+                departure_date=departure_date,
+                departure_time=departure_time,
+            )
+            
+            text_body = f"""UniGO – Un pasajero ha cancelado su reserva
+
+Hola {driver_name},
+
+Te informamos que {passenger_name} ha cancelado su reserva para el siguiente viaje:
+
+📍 Origen: {departure_city}
+🎯 Destino: {destination_city}
+📅 Fecha: {departure_date}
+🕐 Hora: {departure_time}
+👤 Pasajero: {passenger_name}
+
+Información importante:
+• Los asientos de esta reserva han sido liberados y están disponibles nuevamente.
+• Puedes ver todos los detalles del viaje y gestionar tus reservas desde la aplicación.
+• Si tienes otras reservas pendientes, puedes aceptarlas ahora.
+
+© 2025 UniGO - Carpooling universitario
+"""
+            
+            url = "https://api.mailjet.com/v3.1/send"
+            auth_string = f"{mailjet_api_key}:{mailjet_secret_key}"
+            auth_b64 = base64.b64encode(auth_string.encode('ascii')).decode('ascii')
+            
+            headers = {
+                "Authorization": f"Basic {auth_b64}",
+                "Content-Type": "application/json",
+            }
+            
+            payload = {
+                "Messages": [
+                    {
+                        "From": {
+                            "Email": email_from,
+                            "Name": email_from_name,
+                        },
+                        "To": [
+                            {
+                                "Email": to_email,
+                            }
+                        ],
+                        "Subject": subject,
+                        "TextPart": text_body,
+                        "HTMLPart": html_body,
+                    }
+                ]
+            }
+            
+            print(f"[Email] Payload preparado:", flush=True)
+            print(f"  - From: {email_from} ({email_from_name})", flush=True)
+            print(f"  - To: {to_email}", flush=True)
+            print(f"  - Subject: {subject}", flush=True)
+            print(f"[Email] Haciendo POST a Mailjet API...", flush=True)
+            log.info(f"[Email] Haciendo POST a Mailjet API para {to_email}")
+            log.info(f"[Email] From: {email_from} ({email_from_name})")
+            
+            # Usar el mismo timeout que send_verification_email_sync
+            with httpx.Client(timeout=httpx.Timeout(5.0, read=10.0)) as client:
+                print(f"[Email] Enviando a Mailjet API...", flush=True)
+                log.info(f"[Email] Enviando a Mailjet API...")
+                response = client.post(url, json=payload, headers=headers)
+                
+                print(f"[Email] Respuesta recibida: Status {response.status_code}", flush=True)
+                log.info(f"[Email] Respuesta recibida: Status {response.status_code}")
+                
+                if response.status_code != 200:
+                    print(f"[Email] Response body: {response.text}", flush=True)
+                    log.error(f"[Email] Mailjet error response: {response.text}")
+                
+                response.raise_for_status()
+                
+                # Verificar que Mailjet aceptó el email (igual que send_verification_email_sync)
+                if response.status_code == 200:
+                    try:
+                        result = response.json()
+                        print(f"[Email] Mailjet response completa: {result}", flush=True)
+                        log.info(f"[Email] Mailjet response completa: {result}")
+                        
+                        if result.get("Messages"):
+                            msg = result["Messages"][0]
+                            msg_status = msg.get("Status", "unknown")
+                            msg_errors = msg.get("Errors", [])
+                            
+                            print(f"[Email] Status del mensaje: {msg_status}", flush=True)
+                            log.info(f"[Email] Status del mensaje: {msg_status}")
+                            
+                            if msg_status == "success":
+                                print(f"[Email] ✅ Mailjet aceptó el email inmediatamente", flush=True)
+                                log.info(f"[Email] ✅ Mailjet aceptó el email inmediatamente")
+                            else:
+                                print(f"[Email] ⚠️ Mailjet respondió pero Status: {msg_status}", flush=True)
+                                log.warning(f"[Email] ⚠️ Mailjet respondió pero Status: {msg_status}")
+                                if msg_errors:
+                                    print(f"[Email] Errores de Mailjet: {msg_errors}", flush=True)
+                                    log.warning(f"[Email] Errores de Mailjet: {msg_errors}")
+                    except Exception as parse_error:
+                        print(f"[Email] ⚠️ Error parseando respuesta de Mailjet: {parse_error}", flush=True)
+                        log.warning(f"[Email] ⚠️ Error parseando respuesta de Mailjet: {parse_error}")
+            
+            print(f"[Email] ✅ Email enviado exitosamente (Status: {response.status_code})", flush=True)
+            log.info(f"[Email] ✅ Passenger cancellation email sent successfully to {to_email} via Mailjet (Status: {response.status_code})")
+        else:
+            print(f"[Email] ⚠️ EMAIL_BACKEND no es 'mailjet' o faltan credenciales", flush=True)
+            log.warning(f"[Email] ⚠️ EMAIL_BACKEND={email_backend}, no se puede enviar email")
+    except Exception as e:
+        print("=" * 70, flush=True)
+        print(f"[Email] ❌❌❌ ERROR AL ENVIAR EMAIL DE CANCELACIÓN DE RESERVA ❌❌❌", flush=True)
+        print(f"[Email] Error: {str(e)}", flush=True)
+        print("=" * 70, flush=True)
+        log.error("=" * 70)
+        log.error(f"[Email] ❌❌❌ ERROR CRÍTICO al enviar email de cancelación de reserva ❌❌❌")
+        log.error(f"[Email] Email={to_email}, Trip={trip_id}")
+        log.error(f"[Email] Error: {str(e)}")
+        log.error("=" * 70)
+        import traceback
+        traceback.print_exc()
+
+
+def send_trip_confirmed_email_sync(
+    to_email: str,
+    passenger_name: str,
+    driver_name: str,
+    departure_city: str,
+    destination_city: str,
+    departure_date: str,
+    departure_time: str,
+    meeting_point: Optional[str],
+    seats: int,
+    trip_id: int,
+) -> None:
+    """
+    Synchronous wrapper for sending trip confirmed email.
+    SOLUCIÓN DEFINITIVA: Envío directo síncrono sin asyncio.
+    Usa EXACTAMENTE el mismo patrón que send_verification_email_sync.
+    """
+    import threading
+    import base64
+    import httpx
+    thread_name = threading.current_thread().name
+    
+    # FORZAR LOGS INMEDIATOS
+    print("=" * 70, flush=True)
+    print(f"[Email] ===== INICIANDO ENVÍO DE EMAIL DE VIAJE CONFIRMADO =====", flush=True)
+    print(f"[Email] Thread: '{thread_name}'", flush=True)
+    print(f"[Email] Email: {to_email}", flush=True)
+    print(f"[Email] Trip ID: {trip_id}", flush=True)
+    print("=" * 70, flush=True)
+    
+    log.info("=" * 70)
+    log.info(f"[Email] ===== INICIANDO ENVÍO DE EMAIL DE VIAJE CONFIRMADO =====")
+    log.info(f"[Email] Thread: '{thread_name}'")
+    log.info(f"[Email] Email: {to_email}")
+    log.info(f"[Email] Trip ID: {trip_id}")
+    log.info("=" * 70)
+    
+    try:
+        # Cargar configuración directamente (igual que send_verification_email_sync)
+        from dotenv import load_dotenv
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        env_path = os.path.join(backend_dir, ".env")
+        if os.path.exists(env_path):
+            load_dotenv(env_path, override=True)
+        
+        email_backend = os.getenv("EMAIL_BACKEND", "").lower().strip()
+        mailjet_api_key = os.getenv("MAILJET_API_KEY", "").strip()
+        mailjet_secret_key = os.getenv("MAILJET_SECRET_KEY", "").strip()
+        email_from = os.getenv("EMAIL_FROM", "").strip()
+        email_from_name = os.getenv("EMAIL_FROM_NAME", "UniGO")
+        
+        print(f"[Email] Configuración:", flush=True)
+        print(f"  - EMAIL_BACKEND: {email_backend}", flush=True)
+        print(f"  - MAILJET_API_KEY: {'✅' if mailjet_api_key else '❌'}", flush=True)
+        print(f"  - MAILJET_SECRET_KEY: {'✅' if mailjet_secret_key else '❌'}", flush=True)
+        print(f"  - EMAIL_FROM: {email_from}", flush=True)
+        
+        log.info(f"[Email] Configuración: backend={email_backend}, from={email_from}")
+        
+        # Si es Mailjet, enviar directamente SIN asyncio (igual que send_verification_email_sync)
+        if email_backend == "mailjet" and mailjet_api_key and mailjet_secret_key:
+            print(f"[Email] Enviando con Mailjet API (síncrono)...", flush=True)
+            log.info(f"[Email] Enviando con Mailjet API (síncrono)")
+            
+            frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:3001")
+            trip_url = f"{frontend_url}/my-rides?trip={trip_id}"
+            
+            subject = "UniGO – Tu viaje ha sido confirmado ✅"
+            
+            # Generar HTML del email (usar el mismo método del servicio)
+            service = get_email_service()
+            html_body = service._get_trip_confirmed_email_html(
+                passenger_name=passenger_name,
+                driver_name=driver_name,
+                departure_city=departure_city,
+                destination_city=destination_city,
+                departure_date=departure_date,
+                departure_time=departure_time,
+                meeting_point=meeting_point,
+                seats=seats,
+                trip_url=trip_url,
+            )
+            
+            text_body = f"""UniGO – Tu viaje ha sido confirmado ✅
+
+Hola {passenger_name},
+
+¡Excelente noticia! El conductor {driver_name} ha confirmado tu reserva para el siguiente viaje:
+
+📍 Origen: {departure_city}
+🎯 Destino: {destination_city}
+📅 Fecha: {departure_date}
+🕐 Hora: {departure_time}
+👤 Conductor: {driver_name}
+💺 Plazas reservadas: {seats} {('plaza' if seats == 1 else 'plazas')}
+📍 Punto de encuentro: {meeting_point if meeting_point else 'Se acordará con el conductor'}
+
+Próximos pasos:
+• El conductor se pondrá en contacto contigo si necesita coordinar el punto de encuentro.
+• Puedes ver todos los detalles del viaje y contactar con el conductor desde la aplicación.
+• ¡Disfruta de tu viaje!
+
+© 2025 UniGO - Carpooling universitario
+"""
+            
+            url = "https://api.mailjet.com/v3.1/send"
+            auth_string = f"{mailjet_api_key}:{mailjet_secret_key}"
+            auth_b64 = base64.b64encode(auth_string.encode('ascii')).decode('ascii')
+            
+            headers = {
+                "Authorization": f"Basic {auth_b64}",
+                "Content-Type": "application/json",
+            }
+            
+            payload = {
+                "Messages": [
+                    {
+                        "From": {
+                            "Email": email_from,
+                            "Name": email_from_name,
+                        },
+                        "To": [
+                            {
+                                "Email": to_email,
+                            }
+                        ],
+                        "Subject": subject,
+                        "TextPart": text_body,
+                        "HTMLPart": html_body,
+                    }
+                ]
+            }
+            
+            print(f"[Email] Payload preparado:", flush=True)
+            print(f"  - From: {email_from} ({email_from_name})", flush=True)
+            print(f"  - To: {to_email}", flush=True)
+            print(f"  - Subject: {subject}", flush=True)
+            print(f"[Email] Haciendo POST a Mailjet API...", flush=True)
+            log.info(f"[Email] Haciendo POST a Mailjet API para {to_email}")
+            log.info(f"[Email] From: {email_from} ({email_from_name})")
+            
+            # Usar el mismo timeout que send_verification_email_sync
+            with httpx.Client(timeout=httpx.Timeout(5.0, read=10.0)) as client:
+                response = client.post(url, json=payload, headers=headers)
+                
+                print(f"[Email] Respuesta de Mailjet: Status {response.status_code}", flush=True)
+                if response.status_code != 200:
+                    print(f"[Email] Response body: {response.text}", flush=True)
+                
+                response.raise_for_status()
+                
+                # Log de respuesta exitosa
+                try:
+                    response_data = response.json()
+                    print(f"[Email] Mailjet response: {response_data}", flush=True)
+                    log.info(f"[Email] Mailjet response: {response_data}")
+                except:
+                    pass
+            
+            print(f"[Email] ✅ Email enviado exitosamente (Status: {response.status_code})", flush=True)
+            log.info(f"[Email] ✅ Trip confirmation email sent successfully to {to_email} via Mailjet (Status: {response.status_code})")
+        else:
+            print(f"[Email] ⚠️ EMAIL_BACKEND no es 'mailjet' o faltan credenciales", flush=True)
+            log.warning(f"[Email] ⚠️ EMAIL_BACKEND={email_backend}, no se puede enviar email")
+    except Exception as e:
+        print("=" * 70, flush=True)
+        print(f"[Email] ❌❌❌ ERROR AL ENVIAR EMAIL DE VIAJE CONFIRMADO ❌❌❌", flush=True)
+        print(f"[Email] Error: {str(e)}", flush=True)
+        print("=" * 70, flush=True)
+        log.error("=" * 70)
+        log.error(f"[Email] ❌❌❌ ERROR CRÍTICO al enviar email de viaje confirmado ❌❌❌")
+        log.error(f"[Email] Email={to_email}, Trip={trip_id}")
+        log.error(f"[Email] Error: {str(e)}")
+        log.error("=" * 70)
+        import traceback
+        traceback.print_exc()
 
 
 def send_verification_email_sync(email: str, code: str) -> None:

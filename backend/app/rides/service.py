@@ -139,6 +139,39 @@ def get_ride_check_datetime(ride: Ride) -> datetime:
     return check_datetime
 
 
+def calculate_departure_datetime(ride: Ride) -> datetime:
+    """
+    Calculate the departure datetime for a ride by combining departure_date and departure_time.
+    Always returns a timezone-aware UTC datetime.
+    
+    IMPORTANT: The departure_time string (e.g., "18:55") is interpreted as being in
+    Europe/Madrid timezone (Spain), then converted to UTC.
+    This assumes the user enters times in their local Spanish timezone.
+    """
+    time_parts = ride.departure_time.split(':')
+    hour = int(time_parts[0])
+    minute = int(time_parts[1]) if len(time_parts) > 1 else 0
+    
+    # Get the date part
+    if ride.departure_date.tzinfo is not None:
+        departure_date_only = ride.departure_date.date()
+    else:
+        departure_date_only = ride.departure_date.date() if hasattr(ride.departure_date, 'date') else ride.departure_date
+    
+    # Assume the time entered by user is in Spain timezone (Europe/Madrid)
+    # Create datetime in Spain timezone, then convert to UTC
+    spain_tz = pytz.timezone('Europe/Madrid')
+    
+    # Create naive datetime with date and time
+    naive_datetime = datetime.combine(departure_date_only, dt_time(hour=hour, minute=minute))
+    
+    # Localize to Spain timezone, then convert to UTC
+    spain_datetime = spain_tz.localize(naive_datetime)
+    departure_datetime = spain_datetime.astimezone(timezone.utc)
+    
+    return departure_datetime
+
+
 def calculate_arrival_datetime(ride: Ride) -> Optional[datetime]:
     """
     Calculate the arrival datetime for a ride based on departure time and estimated duration.
@@ -434,6 +467,9 @@ def search_rides(db: Session, search_params: RideSearch, exclude_booked_by_user_
             Booking.status != "canceled"
         ).all()}
     
+    # Get current time in UTC for filtering past rides
+    now = datetime.now(timezone.utc)
+    
     # Build query for exact matches
     query = db.query(Ride).join(User).filter(Ride.is_active == True, Ride.available_seats > 0)
     
@@ -459,8 +495,11 @@ def search_rides(db: Session, search_params: RideSearch, exclude_booked_by_user_
     # Order by departure date (soonest first)
     exact_rides = query.order_by(Ride.departure_date.asc(), Ride.departure_time.asc()).all()
     
-    # Filter out booked rides
-    exact_rides = [r for r in exact_rides if r.id not in booked_ride_ids]
+    # Filter out booked rides and past rides (departure_time < now)
+    exact_rides = [
+        r for r in exact_rides 
+        if r.id not in booked_ride_ids and calculate_departure_datetime(r) > now
+    ]
     
     # Convert to RideOut
     exact_matches = []
@@ -501,8 +540,11 @@ def search_rides(db: Session, search_params: RideSearch, exclude_booked_by_user_
         
         all_nearby_rides = nearby_query.order_by(Ride.departure_date.asc(), Ride.departure_time.asc()).all()
         
-        # Filter out booked rides
-        all_nearby_rides = [r for r in all_nearby_rides if r.id not in booked_ride_ids]
+        # Filter out booked rides and past rides (departure_time < now)
+        all_nearby_rides = [
+            r for r in all_nearby_rides 
+            if r.id not in booked_ride_ids and calculate_departure_datetime(r) > now
+        ]
         
         # Check distance for each ride
         for ride in all_nearby_rides:
@@ -537,9 +579,48 @@ def search_rides(db: Session, search_params: RideSearch, exclude_booked_by_user_
     return exact_matches, nearby_matches
 
 
+def mark_completed_rides(db: Session, user_id: int = None) -> int:
+    """
+    Mark rides as completed (is_active=False) if their departure time has passed.
+    If user_id is provided, only mark rides for that user. Otherwise, mark all past rides.
+    Returns the number of rides marked as completed.
+    """
+    from datetime import timezone
+    
+    now = datetime.now(timezone.utc)
+    
+    # Query active rides
+    query = db.query(Ride).filter(Ride.is_active == True)
+    if user_id:
+        query = query.filter(Ride.driver_id == user_id)
+    
+    rides = query.all()
+    marked_count = 0
+    
+    for ride in rides:
+        try:
+            departure_datetime = calculate_departure_datetime(ride)
+            # If departure time has passed, mark as completed
+            if departure_datetime < now:
+                ride.is_active = False
+                marked_count += 1
+        except Exception as e:
+            logger.warning(f"Error marking ride {ride.id} as completed: {e}")
+            continue
+    
+    if marked_count > 0:
+        db.commit()
+        logger.info(f"Marked {marked_count} ride(s) as completed")
+    
+    return marked_count
+
+
 def get_user_rides(db: Session, user_id: int) -> List[RideOut]:
     """Get all rides created by a user (excluding rides in registro - past or cancelled)"""
     from datetime import timezone
+    
+    # Mark completed rides for this user before fetching
+    mark_completed_rides(db, user_id)
     
     try:
         rides = db.query(Ride).filter(

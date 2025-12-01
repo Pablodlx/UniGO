@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Ride } from "@/lib/api";
 import Image from "next/image";
+import ReviewsModal from "./ReviewsModal";
 
 function getAvatarUrl(avatarUrl: string | null | undefined): string | null {
   if (!avatarUrl) return null;
@@ -22,6 +23,7 @@ interface RideCardProps {
 
 export default function RideCard({ ride, onClick }: RideCardProps) {
   const [mounted, setMounted] = useState(false);
+  const [showReviewsModal, setShowReviewsModal] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -169,6 +171,18 @@ export default function RideCard({ ride, onClick }: RideCardProps) {
                 <span>{ride.driver_completed_trips || 0} viajes</span>
               </div>
             )}
+            {/* Ver valoraciones button */}
+            {ride.driver_id && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation(); // Prevent card click
+                  setShowReviewsModal(true);
+                }}
+                className="text-xs text-green-600 hover:text-green-700 font-medium mt-1 underline transition-colors"
+              >
+                Ver valoraciones
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -194,6 +208,15 @@ export default function RideCard({ ride, onClick }: RideCardProps) {
           }
         </div>
       </div>
+
+      {/* Reviews Modal */}
+      {ride.driver_id && (
+        <ReviewsModal
+          isOpen={showReviewsModal}
+          userId={ride.driver_id}
+          onClose={() => setShowReviewsModal(false)}
+        />
+      )}
     </div>
   );
 }

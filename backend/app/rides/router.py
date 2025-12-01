@@ -1,6 +1,8 @@
 from typing import List
+from datetime import datetime
+import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Header
+from fastapi import APIRouter, Depends, HTTPException, Query, Header, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.auth.models import Ride, User, Booking, BookingStatus, Notification
@@ -13,6 +15,8 @@ from app.rides.favorites_schemas import FavoriteRideCreate, FavoriteRideOut
 from app.utils.profile_validation import is_profile_complete
 
 router = APIRouter(prefix="/rides", tags=["Rides"])
+
+log = logging.getLogger(__name__)
 
 
 @router.post("/", response_model=RideOut)
@@ -147,14 +151,41 @@ def get_my_bookings(
     """Get all bookings made by the current user (excluding rides in registro - past or cancelled)"""
     from sqlalchemy import and_
     from datetime import datetime, timezone
-    from app.rides.service import get_ride_check_datetime
+    from app.rides.service import get_ride_check_datetime, calculate_departure_datetime
+    
+    # Mark completed rides for bookings owned by this user
+    # Get all rides where user has bookings and mark them as completed if needed
+    from app.auth.models import Booking
+    user_booking_rides = db.query(Booking.ride_id).filter(
+        Booking.passenger_id == current_user.id
+    ).distinct().all()
+    ride_ids = [r[0] for r in user_booking_rides]
+    
+    if ride_ids:
+        # Mark completed rides directly by ride_id
+        now = datetime.now(timezone.utc)
+        rides_to_mark = db.query(Ride).filter(
+            Ride.id.in_(ride_ids),
+            Ride.is_active == True
+        ).all()
+        
+        for ride in rides_to_mark:
+            try:
+                departure_datetime = calculate_departure_datetime(ride)
+                if departure_datetime < now:
+                    ride.is_active = False
+            except Exception:
+                continue
+        
+        if rides_to_mark:
+            db.commit()
     
     try:
-        # Get all bookings for this user
+        # Get all bookings for this user (exclude canceled bookings)
         bookings = db.query(Booking).filter(
             and_(
                 Booking.passenger_id == current_user.id,
-                Booking.status != "canceled"
+                Booking.status != BookingStatus.canceled
             )
         ).all()
         
@@ -170,9 +201,16 @@ def get_my_bookings(
                 # Get the datetime to check if ride has passed (arrival time if available, else departure)
                 check_datetime = get_ride_check_datetime(ride)
                 
-                # Exclude rides that are in registro (past or cancelled)
-                # Only include active rides that haven't passed yet (based on arrival time)
-                if check_datetime >= now and ride.is_active:
+                # Include bookings if:
+                # 1. The ride hasn't passed yet (future rides), OR
+                # 2. The booking is still pending (user needs to see pending status even if ride passed)
+                # 3. The ride is active
+                should_include = (
+                    ride.is_active and 
+                    (check_datetime >= now or booking.status == BookingStatus.pending)
+                )
+                
+                if should_include:
                     driver = db.query(User).filter(User.id == ride.driver_id).first()
                     if not driver:
                         continue
@@ -570,6 +608,22 @@ def get_ride(
     db: Session = Depends(get_db),
 ):
     """Get a specific ride by ID"""
+    # Mark as completed if needed before fetching
+    from app.rides.service import calculate_departure_datetime
+    from datetime import timezone
+    from app.auth.models import Ride
+    
+    ride_obj = db.query(Ride).filter(Ride.id == ride_id).first()
+    if ride_obj and ride_obj.is_active:
+        try:
+            now = datetime.now(timezone.utc)
+            departure_datetime = calculate_departure_datetime(ride_obj)
+            if departure_datetime < now:
+                ride_obj.is_active = False
+                db.commit()
+        except Exception:
+            pass  # Continue even if marking fails
+    
     ride = service.get_ride_with_driver_info(db, ride_id)
     if not ride:
         raise HTTPException(status_code=404, detail="Ride not found")
@@ -690,6 +744,7 @@ def cancel_ride(
 @router.post("/{ride_id}/cancel-booking")
 def cancel_booking(
     ride_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -737,6 +792,52 @@ def cancel_booking(
         db.refresh(ride)
         if was_confirmed:
             db.refresh(notification)
+            
+            # Enviar email de cancelación al conductor (después del commit exitoso)
+            # Usar BackgroundTasks para no bloquear la respuesta HTTP
+            try:
+                # Obtener datos del conductor
+                driver = db.query(User).filter(User.id == ride.driver_id).first()
+                
+                if driver:
+                    # Formatear fecha y hora
+                    departure_date_formatted = ride.departure_date.strftime("%d de %B de %Y")
+                    # Capitalizar el mes en español
+                    months_es = {
+                        "January": "enero", "February": "febrero", "March": "marzo",
+                        "April": "abril", "May": "mayo", "June": "junio",
+                        "July": "julio", "August": "agosto", "September": "septiembre",
+                        "October": "octubre", "November": "noviembre", "December": "diciembre"
+                    }
+                    for en, es in months_es.items():
+                        departure_date_formatted = departure_date_formatted.replace(en, es)
+                    
+                    driver_name = driver.full_name if driver.full_name else driver.email
+                    passenger_name = current_user.full_name if current_user.full_name else current_user.email
+                    
+                    # Importar y añadir tarea en background
+                    from app.core.email import send_passenger_cancellation_email_sync
+                    
+                    log.info(f"[BOOKING CANCEL] [EMAIL] Enviando email de cancelación de reserva a {driver.email} para booking {booking.id}")
+                    
+                    # Añadir tarea en background usando la versión síncrona
+                    background_tasks.add_task(
+                        send_passenger_cancellation_email_sync,
+                        to_email=driver.email,
+                        driver_name=driver_name,
+                        passenger_name=passenger_name,
+                        departure_city=ride.departure_city,
+                        destination_city=ride.destination_city,
+                        departure_date=departure_date_formatted,
+                        departure_time=ride.departure_time,
+                        trip_id=ride.id,
+                    )
+            except Exception as e:
+                # No hacer crash si falla el email, solo loguear
+                log.error(
+                    f"[BOOKING CANCEL] [EMAIL] ❌ Error al enviar email de cancelación: {str(e)}",
+                    exc_info=True
+                )
         
         return {"message": "Booking canceled successfully", "ride_id": ride_id, "available_seats": ride.available_seats}
     except Exception as e:
