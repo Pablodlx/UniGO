@@ -765,81 +765,25 @@ def cancel_booking(
         raise HTTPException(status_code=404, detail="Ride not found")
     
     try:
-        # Check if booking was confirmed (to notify driver)
-        was_confirmed = booking.status == BookingStatus.confirmed
+        # Use centralized cancellation function
+        from app.bookings.service import cancel_booking_from_passenger
         
-        # Cancel the booking
-        booking.status = BookingStatus.canceled
+        cancel_booking_from_passenger(
+            db=db,
+            booking=booking,
+            reason="",
+            final_status=BookingStatus.canceled,
+            background_tasks=background_tasks,
+        )
         
-        # Restore available seats (only if it was confirmed)
-        if was_confirmed:
-            ride.available_seats += booking.seats
-            
-            # Create notification for the driver
-            notification = Notification(
-                receiver_id=ride.driver_id,
-                type="booking_cancelled",
-                ride_id=ride.id,
-                message=(
-                    f"El pasajero {current_user.full_name or current_user.email} "
-                    f"ha cancelado su reserva para el viaje "
-                    f"{ride.departure_city} → {ride.destination_city}."
-                ),
-            )
-            db.add(notification)
-        
-        db.commit()
+        # Refresh ride to get updated available_seats
         db.refresh(ride)
-        if was_confirmed:
-            db.refresh(notification)
-            
-            # Enviar email de cancelación al conductor (después del commit exitoso)
-            # Usar BackgroundTasks para no bloquear la respuesta HTTP
-            try:
-                # Obtener datos del conductor
-                driver = db.query(User).filter(User.id == ride.driver_id).first()
-                
-                if driver:
-                    # Formatear fecha y hora
-                    departure_date_formatted = ride.departure_date.strftime("%d de %B de %Y")
-                    # Capitalizar el mes en español
-                    months_es = {
-                        "January": "enero", "February": "febrero", "March": "marzo",
-                        "April": "abril", "May": "mayo", "June": "junio",
-                        "July": "julio", "August": "agosto", "September": "septiembre",
-                        "October": "octubre", "November": "noviembre", "December": "diciembre"
-                    }
-                    for en, es in months_es.items():
-                        departure_date_formatted = departure_date_formatted.replace(en, es)
-                    
-                    driver_name = driver.full_name if driver.full_name else driver.email
-                    passenger_name = current_user.full_name if current_user.full_name else current_user.email
-                    
-                    # Importar y añadir tarea en background
-                    from app.core.email import send_passenger_cancellation_email_sync
-                    
-                    log.info(f"[BOOKING CANCEL] [EMAIL] Enviando email de cancelación de reserva a {driver.email} para booking {booking.id}")
-                    
-                    # Añadir tarea en background usando la versión síncrona
-                    background_tasks.add_task(
-                        send_passenger_cancellation_email_sync,
-                        to_email=driver.email,
-                        driver_name=driver_name,
-                        passenger_name=passenger_name,
-                        departure_city=ride.departure_city,
-                        destination_city=ride.destination_city,
-                        departure_date=departure_date_formatted,
-                        departure_time=ride.departure_time,
-                        trip_id=ride.id,
-                    )
-            except Exception as e:
-                # No hacer crash si falla el email, solo loguear
-                log.error(
-                    f"[BOOKING CANCEL] [EMAIL] ❌ Error al enviar email de cancelación: {str(e)}",
-                    exc_info=True
-                )
         
-        return {"message": "Booking canceled successfully", "ride_id": ride_id, "available_seats": ride.available_seats}
+        return {
+            "message": "Booking canceled successfully", 
+            "ride_id": ride_id, 
+            "available_seats": ride.available_seats
+        }
     except Exception as e:
         db.rollback()
         print(f"Error canceling booking: {e}")

@@ -8,8 +8,8 @@ import { useRouter } from "next/navigation";
 import DesktopLayout from "@/components/DesktopLayout";
 import Link from "next/link";
 import { clearToken, getUserRatings, getCurrentUserId } from "@/lib/api";
-import ReviewsModal from "@/components/ReviewsModal";
 import AddressAutocomplete, { AddressValue } from "@/components/AddressAutocomplete";
+import ReviewsModal from "@/components/ReviewsModal";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000/api";
 
@@ -36,86 +36,27 @@ async function getProfile() {
   }
 }
 async function updateProfile(payload: any) {
-  console.log("[updateProfile] Saving profile...");
-  console.log("[updateProfile] Payload:", payload);
-  console.log("[updateProfile] URL:", `${BASE}/me/profile`);
-  
-  let response: Response | null = null;
-  
-  try {
-    response = await fetch(`${BASE}/me/profile`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify(payload),
-    });
-  } catch (fetchError: unknown) {
-    console.error("[updateProfile] Fetch error:", fetchError);
-    // Handle ALL fetch errors - never let TypeError propagate
-    const errorMsg = fetchError instanceof Error ? fetchError.message : String(fetchError);
-    if (errorMsg.includes("Failed to fetch") || fetchError instanceof TypeError) {
-      throw new Error("No se pudo conectar con el servidor. Por favor, verifica que el backend esté corriendo.");
-    }
-    throw new Error("Error de red al guardar el perfil");
+  const r = await fetch(`${BASE}/me/profile`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const txt = await r.text();
+    throw new Error(txt || `Update: ${r.status}`);
   }
-  
-  if (!response) {
-    throw new Error("No se recibió respuesta del servidor");
-  }
-  
-  console.log("[updateProfile] Response status:", response.status, response.statusText);
-  
-  // Read response text once - handle errors gracefully
-  let responseText = "";
-  try {
-    responseText = await response.text();
-    console.log("[updateProfile] Response text length:", responseText.length);
-    if (responseText.length > 0) {
-      console.log("[updateProfile] Response text preview:", responseText.substring(0, 500));
-    }
-  } catch (readError: unknown) {
-    console.error("[updateProfile] Error reading response:", readError);
-    // If we can't read but status is OK, assume success
-    if (response.ok) {
-      return null;
-    } else {
-      throw new Error(`Error al actualizar el perfil: ${response.status} ${response.statusText}`);
-    }
-  }
-  
-  if (!response.ok) {
-    // Try to parse error as JSON
-    let errorMessage = `Error al actualizar el perfil: ${response.status}`;
-    try {
-      if (responseText && responseText.trim()) {
-        const errorJson = JSON.parse(responseText);
-        errorMessage = errorJson.detail || errorJson.message || errorJson.error || responseText || errorMessage;
-      }
-    } catch {
-      // Not JSON, use text as is if available
-      if (responseText && responseText.trim()) {
-        errorMessage = responseText;
-      }
-    }
-    console.error("[updateProfile] Backend error:", errorMessage);
-    throw new Error(errorMessage);
-  }
-  
-  // Parse successful response
-  if (!responseText || responseText.trim() === "") {
-    console.log("[updateProfile] Empty response, returning null");
-    return null;
-  }
-  
-  try {
-    const parsed = JSON.parse(responseText);
-    console.log("[updateProfile] Successfully parsed response");
-    return parsed;
-  } catch (parseError: unknown) {
-    console.error("[updateProfile] JSON parse error:", parseError);
-    console.error("[updateProfile] Response text that failed:", responseText);
-    // If we can't parse but status was OK, assume success
-    return null;
-  }
+  return r.json();
+}
+async function uploadAvatar(file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  const r = await fetch(`${BASE}/me/avatar`, {
+    method: "POST",
+    headers: { ...authHeaders() },
+    body: form,
+  });
+  if (!r.ok) throw new Error(`Avatar: ${r.status}`);
+  return r.json();
 }
 
 // --- validación ---
@@ -135,7 +76,6 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 interface ProfileData {
-  id?: number;
   email: string;
   full_name: string | null;
   university: string | null;
@@ -150,8 +90,6 @@ interface ProfileData {
   avatar_url: string | null;
   average_rating: number | null;
   rating_count: number;
-  completed_driver_trips: number;
-  completed_passenger_trips: number;
 }
 
 export default function ProfilePage() {
@@ -161,7 +99,7 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [avatarMsg, setAvatarMsg] = useState<string | null>(null);
   const [homeAddress, setHomeAddress] = useState<AddressValue | null>(null);
   const [userRatings, setUserRatings] = useState<{
     average: number;
@@ -174,6 +112,7 @@ export default function ProfilePage() {
     }>;
   } | null>(null);
   const [showReviewsModal, setShowReviewsModal] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
 
   const {
     register,
@@ -211,11 +150,6 @@ export default function ProfilePage() {
         const p = await getProfile();
         if (cancelled) return;
         
-        // Construir URL completa del avatar si es relativa
-        if (p.avatar_url && !p.avatar_url.startsWith('http')) {
-          p.avatar_url = `${BASE.replace('/api', '')}${p.avatar_url}`;
-        }
-        
         setProfile(p);
         
         const fullName = p.full_name ?? "";
@@ -242,6 +176,22 @@ export default function ProfilePage() {
         } else {
           setHomeAddress(null);
           setValue("home_address", null);
+        }
+        
+        // Load user ratings and get current user ID
+        try {
+          const userId = await getCurrentUserId();
+          if (cancelled) return;
+          if (userId) {
+            setCurrentUserId(userId);
+            const ratings = await getUserRatings(userId);
+            if (cancelled) return;
+            setUserRatings(ratings);
+          }
+        } catch (ratingError) {
+          console.error("Error loading ratings:", ratingError);
+          // Don't fail the whole page load if ratings fail
+          setUserRatings(null);
         }
       } catch (e: unknown) {
         if (cancelled) return;
@@ -296,9 +246,6 @@ export default function ProfilePage() {
     setSuccessMsg(null);
     setSaving(true);
     
-    console.log("[onSubmit] Starting profile save...");
-    console.log("[onSubmit] Form values:", values);
-    
     try {
       const payload = {
         full_name: `${values.first_name} ${values.last_name}`.trim(),
@@ -312,203 +259,70 @@ export default function ProfilePage() {
         } : null,
       };
       
-      console.log("[onSubmit] Payload to send:", payload);
-      
       const updated = await updateProfile(payload);
-      console.log("[onSubmit] Update response received:", updated);
+      setProfile(updated);
+      setSuccessMsg("Perfil guardado correctamente ✅");
       
-      // If updateProfile returns null (empty response), fetch the updated profile
-      let profileData = updated;
-      if (!profileData) {
-        console.log("[onSubmit] Empty response, fetching profile...");
-        try {
-          profileData = await getProfile();
-          console.log("[onSubmit] Profile fetched:", profileData);
-        } catch (fetchError) {
-          console.error("[onSubmit] Error fetching profile:", fetchError);
-          // If we can't fetch, still show success since the update likely succeeded
-          setSuccessMsg("Perfil guardado correctamente ✅");
-          setSaving(false);
+      const fullName = updated.full_name ?? "";
+      const nameParts = fullName.split(" ");
+      const firstName = nameParts[0] ?? "";
+      const lastName = nameParts.slice(1).join(" ") ?? "";
+      
+      setValue("first_name", firstName);
+      setValue("last_name", lastName);
+      setValue("university", updated.university ?? "");
+      setValue("degree", updated.degree ?? "");
+      setValue("course", updated.course ?? 1);
+      
+      if (updated.home_address) {
+        const addressValue: AddressValue = {
+          formattedAddress: updated.home_address.formatted_address,
+          placeId: updated.home_address.place_id,
+          lat: updated.home_address.lat,
+          lng: updated.home_address.lng,
+        };
+        setHomeAddress(addressValue);
+        setValue("home_address", addressValue);
+      } else {
+        setHomeAddress(null);
+        setValue("home_address", null);
+      }
+    } catch (e: any) {
+      const msg = e?.message ?? "No se pudo guardar";
+        if (msg.includes("401") || msg.includes("credentials")) {
+          localStorage.removeItem("token");
+          router.push("/login");
           return;
         }
-      }
-      
-      if (profileData) {
-        setProfile(profileData);
-        setSuccessMsg("Perfil guardado correctamente ✅");
-        
-        const fullName = profileData.full_name ?? "";
-        const nameParts = fullName.split(" ");
-        const firstName = nameParts[0] ?? "";
-        const lastName = nameParts.slice(1).join(" ") ?? "";
-        
-        setValue("first_name", firstName);
-        setValue("last_name", lastName);
-        setValue("university", profileData.university ?? "");
-        setValue("degree", profileData.degree ?? "");
-        setValue("course", profileData.course ?? 1);
-        
-        if (profileData.home_address) {
-          const addressValue: AddressValue = {
-            formattedAddress: profileData.home_address.formatted_address,
-            placeId: profileData.home_address.place_id,
-            lat: profileData.home_address.lat,
-            lng: profileData.home_address.lng,
-          };
-          setHomeAddress(addressValue);
-          setValue("home_address", addressValue);
-        } else {
-          setHomeAddress(null);
-          setValue("home_address", null);
-        }
-      } else {
-        setSuccessMsg("Perfil guardado correctamente ✅");
-      }
-    } catch (e: unknown) {
-      console.error("[onSubmit] Error caught:", e);
-      console.error("[onSubmit] Error type:", typeof e);
-      console.error("[onSubmit] Error constructor:", e?.constructor?.name);
-      
-      // Ensure we always have a proper error message
-      let errorMessage = "No se pudo guardar el perfil";
-      
-      if (e instanceof Error) {
-        errorMessage = e.message;
-        console.error("[onSubmit] Error message:", errorMessage);
-      } else if (typeof e === "string") {
-        errorMessage = e;
-      } else if (e && typeof e === "object" && "message" in e) {
-        errorMessage = String(e.message);
-      } else {
-        errorMessage = String(e);
-      }
-      
-      // Never show TypeError or Load failed - replace with user-friendly message
-      if (errorMessage.includes("TypeError") || 
-          errorMessage.includes("Load failed") || 
-          errorMessage.includes("Failed to load") ||
-          errorMessage.toLowerCase().includes("typeerror")) {
-        console.error("[onSubmit] Detected generic error, replacing with user-friendly message");
-        errorMessage = "Error al guardar el perfil. Por favor, verifica que todos los campos estén completos e intenta de nuevo.";
-      }
-      
-      if (errorMessage.includes("401") || 
-          errorMessage.includes("credentials") || 
-          errorMessage.includes("UNAUTHORIZED")) {
-        localStorage.removeItem("token");
-        router.push("/login");
-        return;
-      }
-      
-      setServerError(errorMessage);
-      mapMissingFieldsToErrors(errorMessage);
+        setServerError(msg);
+        mapMissingFieldsToErrors(msg);
     } finally {
       setSaving(false);
     }
   }
 
-  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    console.log("📸 Archivo seleccionado:", file.name, file.type, file.size);
-
-    // Previsualización inmediata
-    const preview = URL.createObjectURL(file);
-    setAvatarPreview(preview);
-
-    // Subida simple al backend
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const url = `${BASE}/me/avatar`;
-    console.log("📤 Subiendo a:", url);
-
+  async function onPickAvatar(e: React.ChangeEvent<HTMLInputElement>) {
+    setAvatarMsg(null);
+    setServerError(null);
+    if (!e.target.files?.length) return;
+    const file = e.target.files[0];
+    
     try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { 
-          ...authHeaders(),
-          // NO establecer Content-Type - el navegador lo hace automáticamente con boundary
-        },
-        credentials: "include",
-        body: formData,
-      });
-
-      console.log("📥 Respuesta recibida:", res.status, res.statusText);
-
-      if (!res.ok) {
-        const errorText = await res.text().catch(() => "");
-        console.error("❌ Error del servidor:", res.status, errorText);
-        alert(`Error al subir la imagen: ${errorText || res.statusText}`);
-        URL.revokeObjectURL(preview);
-        setAvatarPreview(null);
+      const updated = await uploadAvatar(file);
+      setProfile(updated);
+      setAvatarMsg("Avatar actualizado ✅");
+    } catch (e: any) {
+      const msg = e?.message ?? "No se pudo subir el avatar";
+      if (msg.includes("401") || msg.includes("credentials")) {
+        localStorage.removeItem("token");
+        router.push("/login");
         return;
       }
-
-      const data = await res.json();
-      console.log("✅ Respuesta JSON:", data);
-      
-      const avatarUrl = data.avatar_url;
-      console.log("🖼️ avatar_url recibido:", avatarUrl);
-
-      if (!avatarUrl) {
-        console.warn("⚠️ No hay avatar_url en la respuesta");
-        URL.revokeObjectURL(preview);
-        setAvatarPreview(null);
-        return;
-      }
-
-      // Construir URL completa si es relativa
-      // BASE es "http://127.0.0.1:8000/api"
-      // avatarUrl es "/static/avatars/filename.jpg"
-      // Necesitamos "http://127.0.0.1:8000/static/avatars/filename.jpg"
-      let fullAvatarUrl = avatarUrl;
-      if (!avatarUrl.startsWith('http')) {
-        // Si es relativa, construir URL completa
-        const baseUrl = BASE.replace('/api', ''); // "http://127.0.0.1:8000"
-        fullAvatarUrl = `${baseUrl}${avatarUrl}`; // "http://127.0.0.1:8000/static/avatars/filename.jpg"
-      }
-
-      console.log("🔗 URL completa del avatar:", fullAvatarUrl);
-
-      // Actualizar perfil con la nueva URL
-      setProfile((prev) => {
-        if (!prev) return prev;
-        const updated = { ...prev, avatar_url: fullAvatarUrl };
-        console.log("💾 Perfil actualizado:", updated);
-        return updated;
-      });
-
-      // Limpiar previsualización - ahora usamos la URL del servidor
-      setTimeout(() => {
-        URL.revokeObjectURL(preview);
-        setAvatarPreview(null);
-      }, 200);
-    } catch (err) {
-      console.error("❌ Error de red:", err);
-      const errorMsg = err instanceof Error ? err.message : 'Error desconocido';
-      // No mostrar "Load failed" genérico
-      if (errorMsg.includes("Load failed") || errorMsg.includes("Failed to fetch")) {
-        alert("Error de conexión. Por favor, verifica que el servidor esté funcionando e intenta de nuevo.");
-      } else {
-        alert(`Error al subir la imagen: ${errorMsg}`);
-      }
-      URL.revokeObjectURL(preview);
-      setAvatarPreview(null);
+      setServerError(msg);
     } finally {
       e.target.value = "";
     }
-  };
-
-  // Cleanup preview URL on unmount
-  useEffect(() => {
-    return () => {
-      if (avatarPreview) {
-        URL.revokeObjectURL(avatarPreview);
-      }
-    };
-  }, [avatarPreview]);
+  }
 
   // Show loading state during initial load
   if (loading && !profile) {
@@ -568,12 +382,6 @@ export default function ProfilePage() {
                 </svg>
                 <span>Mis Viajes</span>
               </Link>
-              <Link href="/my-alerts" className="flex items-center space-x-2 text-gray-600 hover:text-orange-600 transition-colors font-medium">
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z"/>
-                </svg>
-                <span>Mis Alertas</span>
-              </Link>
               <button className="flex items-center space-x-2 text-orange-600 font-medium">
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd"/>
@@ -611,43 +419,24 @@ export default function ProfilePage() {
               {/* Photo Section */}
               <div className="text-center">
                 <div className="relative inline-block">
-                  <div className="w-32 h-32 bg-gray-200 rounded-full flex items-center justify-center mx-auto overflow-hidden">
-                    {avatarPreview ? (
+                  <div className="w-32 h-32 bg-gray-200 rounded-full flex items-center justify-center mx-auto">
+                    {profile?.avatar_url ? (
                       <img
-                        src={avatarPreview}
-                        alt="Avatar preview"
-                        className="h-32 w-32 rounded-full object-cover"
-                      />
-                    ) : profile?.avatar_url ? (
-                      <img
-                        src={
-                          profile.avatar_url.startsWith('http') 
-                            ? profile.avatar_url 
-                            : `${BASE.replace('/api', '')}${profile.avatar_url}`
-                        }
+                        src={profile.avatar_url.startsWith('http') ? profile.avatar_url : `${BASE.replace('/api', '')}${profile.avatar_url}`}
                         alt="Avatar"
-                        className="h-32 w-32 rounded-full object-cover"
+                        className="w-32 h-32 rounded-full object-cover"
                         onError={(e) => {
-                          console.error("❌ Error cargando imagen:", e.currentTarget.src);
-                          // Ocultar la imagen y mostrar el fallback
                           e.currentTarget.style.display = 'none';
-                          const fallback = e.currentTarget.nextElementSibling as HTMLElement;
-                          if (fallback) fallback.style.display = 'flex';
                         }}
                       />
-                    ) : null}
-                    {/* Fallback: círculo con inicial */}
-                    <div 
-                      className={`w-32 h-32 bg-green-500 rounded-full flex items-center justify-center ${avatarPreview || profile?.avatar_url ? 'hidden' : ''}`}
-                      style={{ display: avatarPreview || profile?.avatar_url ? 'none' : 'flex' }}
-                    >
-                      <span className="text-white text-4xl font-bold">
-                        {(profile?.full_name || profile?.email || "U").charAt(0).toUpperCase()}
-                      </span>
-                    </div>
+                    ) : (
+                      <svg className="w-16 h-16 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                      </svg>
+                    )}
                   </div>
                   <label className="absolute -bottom-2 -right-2 bg-orange-500 text-white rounded-full p-3 cursor-pointer hover:bg-orange-600 transition-colors shadow-lg">
-                    <input type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
+                    <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={onPickAvatar} />
                     <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
                     </svg>
@@ -666,10 +455,10 @@ export default function ProfilePage() {
                         <span className="text-lg font-semibold text-gray-800">{profile.average_rating.toFixed(1)}</span>
                         <span className="text-sm text-gray-500">({profile.rating_count} {profile.rating_count === 1 ? 'valoración' : 'valoraciones'})</span>
                       </div>
-                      {profile.rating_count > 0 && (
+                      {profile.rating_count > 0 && currentUserId && (
                         <button
                           onClick={() => setShowReviewsModal(true)}
-                          className="text-sm text-green-600 hover:text-green-700 font-medium underline"
+                          className="text-sm text-green-600 hover:text-green-700 font-medium underline transition-colors"
                         >
                           Ver valoraciones
                         </button>
@@ -678,25 +467,6 @@ export default function ProfilePage() {
                   ) : (
                     <div className="text-sm text-gray-500">No hay valoraciones aún</div>
                   )}
-                </div>
-
-                {/* Trip Statistics */}
-                <div className="flex gap-6 mt-4 text-gray-800 justify-center">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🚗</span>
-                    <div>
-                      <p className="text-sm font-semibold">Conductor</p>
-                      <p className="text-sm">{profile?.completed_driver_trips || 0} viajes</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">👤</span>
-                    <div>
-                      <p className="text-sm font-semibold">Pasajero</p>
-                      <p className="text-sm">{profile?.completed_passenger_trips || 0} viajes</p>
-                    </div>
-                  </div>
                 </div>
               </div>
 
@@ -808,57 +578,17 @@ export default function ProfilePage() {
                   <p className="text-green-800 text-sm font-medium">{successMsg}</p>
                 </div>
               )}
+              {avatarMsg && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                  <p className="text-blue-800 text-sm font-medium">{avatarMsg}</p>
+                </div>
+              )}
               {serverError && (
                 <div className="bg-red-50 border border-red-200 rounded-xl p-4">
                   <p className="text-red-800 text-sm font-medium">{serverError}</p>
                 </div>
               )}
 
-              {/* Ratings List */}
-              {userRatings && userRatings.ratings.length > 0 && (
-                <div className="mt-8 pt-8 border-t border-gray-200">
-                  <h3 className="text-xl font-bold text-gray-900 mb-4">Valoraciones recibidas</h3>
-                  <div className="space-y-4">
-                    {userRatings.ratings.map((rating, index) => (
-                      <div key={index} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex items-center space-x-2">
-                            <div className="flex">
-                              {[1, 2, 3, 4, 5].map((star) => (
-                                <svg
-                                  key={star}
-                                  className={`w-5 h-5 ${
-                                    star <= rating.score ? "text-yellow-400" : "text-gray-300"
-                                  }`}
-                                  fill="currentColor"
-                                  viewBox="0 0 20 20"
-                                >
-                                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                                </svg>
-                              ))}
-                            </div>
-                            <span className="text-sm text-gray-500">
-                              {new Date(rating.created_at).toLocaleDateString('es-ES', {
-                                year: 'numeric',
-                                month: 'long',
-                                day: 'numeric'
-                              })}
-                            </span>
-                          </div>
-                        </div>
-                        {rating.comment && (
-                          <p className="text-gray-700 mt-2">{rating.comment}</p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {userRatings && userRatings.ratings.length === 0 && (
-                <div className="mt-8 pt-8 border-t border-gray-200">
-                  <p className="text-sm text-gray-500 text-center">Sin valoraciones aún</p>
-                </div>
-              )}
 
               {/* Submit Button */}
               <div className="pt-6">
@@ -874,12 +604,12 @@ export default function ProfilePage() {
           </div>
         </div>
       </div>
-
+      
       {/* Reviews Modal */}
-      {showReviewsModal && (
+      {currentUserId && (
         <ReviewsModal
           isOpen={showReviewsModal}
-          userId={getCurrentUserId() || 0}
+          userId={currentUserId}
           onClose={() => setShowReviewsModal(false)}
         />
       )}

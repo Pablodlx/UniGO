@@ -1646,39 +1646,21 @@ def cancel_auto_bookings_for_dates(
         
         # This booking matches the removed date criteria - cancel it (so it appears in registro)
         try:
-            was_confirmed = booking.status == BookingStatus.confirmed
+            # Use centralized cancellation function
+            from app.bookings.service import cancel_booking_from_passenger
             
-            # Cancel the booking (so it appears in registro as cancelled)
-            booking.status = BookingStatus.canceled
+            cancel_booking_from_passenger(
+                db=db,
+                booking=booking,
+                reason="debido a que se eliminó la fecha de su alerta de búsqueda automática.",
+                final_status=BookingStatus.canceled,
+                background_tasks=None,  # No background_tasks available in service context
+            )
             
-            # If it was confirmed, restore seats and notify driver
-            if was_confirmed:
-                ride.available_seats += booking.seats
-                
-                # Get passenger user for notification
-                passenger = db.query(User).filter(User.id == alert.user_id).first()
-                passenger_name = passenger.full_name if passenger and passenger.full_name else (passenger.email if passenger else "Un pasajero")
-                
-                # Create notification for the driver (same as when passenger cancels)
-                notification = create_notification(
-                    db=db,
-                    receiver_id=ride.driver_id,
-                    type="booking_cancelled",
-                    message=(
-                        f"El pasajero {passenger_name} "
-                        f"ha cancelado su reserva para el viaje "
-                        f"{ride.departure_city} → {ride.destination_city}."
-                    ),
-                    ride_id=ride.id,
-                )
-                db.add(notification)
-            
-            db.commit()
             canceled_count += 1
             print(f"Canceled auto-booking {booking.id} for removed date {ride_date}")
             
         except Exception as e:
-            db.rollback()
             print(f"Error canceling booking {booking.id}: {e}")
             import traceback
             traceback.print_exc()
@@ -1797,40 +1779,21 @@ def cancel_all_auto_bookings_for_alert(db: Session, alert: SearchAlert) -> None:
         
         # This booking matches the alert criteria - reject it (so it appears in registro)
         try:
-            was_confirmed = booking.status == BookingStatus.confirmed
+            # Use centralized cancellation function (with rejected status for deleted alerts)
+            from app.bookings.service import cancel_booking_from_passenger
             
-            # Reject the booking (so it appears in registro as rejected)
-            booking.status = BookingStatus.rejected
+            cancel_booking_from_passenger(
+                db=db,
+                booking=booking,
+                reason="debido a que eliminó su alerta de búsqueda automática.",
+                final_status=BookingStatus.rejected,  # Use rejected for deleted alerts
+                background_tasks=None,  # No background_tasks available in service context
+            )
             
-            # If it was confirmed, restore seats and notify driver
-            if was_confirmed:
-                ride.available_seats += booking.seats
-                
-                # Get passenger user for notification
-                passenger = db.query(User).filter(User.id == alert.user_id).first()
-                passenger_name = passenger.full_name if passenger and passenger.full_name else (passenger.email if passenger else "Un pasajero")
-                
-                # Create notification for the driver (same as when passenger cancels)
-                notification = create_notification(
-                    db=db,
-                    receiver_id=ride.driver_id,
-                    type="booking_cancelled",
-                    message=(
-                        f"El pasajero {passenger_name} "
-                        f"ha cancelado su reserva para el viaje "
-                        f"{ride.departure_city} → {ride.destination_city} "
-                        f"debido a que eliminó su alerta de búsqueda automática."
-                    ),
-                    ride_id=ride.id,
-                )
-                db.add(notification)
-            
-            db.commit()
             canceled_count += 1
             print(f"Rejected auto-booking {booking.id} for deleted alert {alert.id}")
             
         except Exception as e:
-            db.rollback()
             print(f"Error rejecting booking {booking.id}: {e}")
             import traceback
             traceback.print_exc()
