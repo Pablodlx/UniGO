@@ -55,3 +55,13 @@ class RatingCreateByRide(BaseModel):
     comment: Optional[str] = Field(None, max_length=500, description="Optional text review")
 
 
+class ReviewDetailResponse(BaseModel):
+    """Response schema for GET /users/{user_id}/reviews"""
+    reviewer_id: int
+    reviewer_name: str
+    reviewer_avatar_url: Optional[str] = None
+    rating: int
+    comment: Optional[str] = None
+    created_at: datetime
+
+

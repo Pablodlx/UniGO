@@ -428,6 +428,16 @@ def reject_booking(
         # NO modificamos alert.active aquí - la alerta sigue funcionando
         print(f"[BOOKING REJECT] ✅ Booking {booking_id} rejected. Alert remains active and will continue searching for matching trips.")
         
+        # Reactivar la alerta si esta reserva fue generada por una alerta automática
+        try:
+            from app.rides.service import on_booking_rejected
+            on_booking_rejected(db, booking)
+        except Exception as e:
+            print(f"[BOOKING REJECT] Error calling on_booking_rejected: {e}")
+            import traceback
+            traceback.print_exc()
+            # No fallamos el rechazo si esto falla
+        
         # Crear mensaje automático para notificación al pasajero
         system_message = Message(
             trip_id=ride.id,

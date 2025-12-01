@@ -101,6 +101,8 @@ class Booking(Base):
     passenger_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     status: Mapped[BookingStatus] = mapped_column(Enum(BookingStatus), default=BookingStatus.pending, nullable=False)
     seats: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    search_alert_id: Mapped[Optional[int]] = mapped_column(ForeignKey("search_alerts.id"), nullable=True, index=True)  # ID of the alert that created this booking
+    created_by_alert: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # Flag to identify automatic bookings
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
@@ -109,6 +111,7 @@ class Booking(Base):
     ride: Mapped["Ride"] = relationship("Ride", back_populates="bookings")
     passenger: Mapped["User"] = relationship("User", back_populates="bookings")
     ratings: Mapped[list["Rating"]] = relationship("Rating", back_populates="booking")
+    search_alert: Mapped[Optional["SearchAlert"]] = relationship("SearchAlert", foreign_keys=[search_alert_id])
 
 
 class Rating(Base):

@@ -528,6 +528,22 @@ export async function getUserRatings(userId: number): Promise<UserRatingsRespons
   });
 }
 
+// --- User Reviews (Detailed) ---
+export interface ReviewDetail {
+  reviewer_id: number;
+  reviewer_name: string;
+  reviewer_avatar_url: string | null;
+  rating: number;
+  comment: string | null;
+  created_at: string;
+}
+
+export async function getUserReviews(userId: number): Promise<ReviewDetail[]> {
+  return fetchJson<ReviewDetail[]>(`${BASE}/users/${userId}/reviews`, {
+    headers: { ...authHeaders() },
+  });
+}
+
 // --- Favorite Rides ---
 export interface FavoriteRide {
   id: number;

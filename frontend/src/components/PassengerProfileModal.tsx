@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { getUserProfile, removePassengerFromRide, freeSeat, UserProfile } from "@/lib/api";
 import Image from "next/image";
+import ReviewsModal from "./ReviewsModal";
 
 interface PassengerProfileModalProps {
   isOpen: boolean;
@@ -38,6 +39,7 @@ export default function PassengerProfileModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
+  const [showReviewsModal, setShowReviewsModal] = useState(false);
 
   useEffect(() => {
     if (isOpen && userId) {
@@ -185,15 +187,25 @@ export default function PassengerProfileModal({
                     {profile.full_name || profile.email}
                   </h3>
                   {profile.average_rating !== null && profile.average_rating > 0 && (
-                    <div className="flex items-center space-x-2 mt-2">
-                      <span className="text-2xl">⭐</span>
-                      <span className="text-xl font-semibold text-gray-700">
-                        {profile.average_rating.toFixed(1)}
-                      </span>
-                      {profile.rating_count > 0 && (
-                        <span className="text-sm text-gray-500">
-                          ({profile.rating_count} valoración{profile.rating_count !== 1 ? "es" : ""})
+                    <div className="flex flex-col items-start space-y-2 mt-2">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-2xl">⭐</span>
+                        <span className="text-xl font-semibold text-gray-700">
+                          {profile.average_rating.toFixed(1)}
                         </span>
+                        {profile.rating_count > 0 && (
+                          <span className="text-sm text-gray-500">
+                            ({profile.rating_count} valoración{profile.rating_count !== 1 ? "es" : ""})
+                          </span>
+                        )}
+                      </div>
+                      {profile.rating_count > 0 && (
+                        <button
+                          onClick={() => setShowReviewsModal(true)}
+                          className="text-sm text-green-600 hover:text-green-700 font-medium underline"
+                        >
+                          Ver valoraciones
+                        </button>
                       )}
                     </div>
                   )}
@@ -269,6 +281,13 @@ export default function PassengerProfileModal({
           ) : null}
         </div>
       </div>
+
+      {/* Reviews Modal */}
+      <ReviewsModal
+        isOpen={showReviewsModal}
+        userId={userId}
+        onClose={() => setShowReviewsModal(false)}
+      />
     </div>
   );
 }

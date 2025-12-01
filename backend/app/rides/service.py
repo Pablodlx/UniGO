@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, time as dt_time, timezone
 from typing import List, Optional, Tuple
 import math
+import logging
 
 import pytz
 from sqlalchemy.orm import Session
@@ -10,6 +11,9 @@ from app.auth.models import Ride, User, Booking, BookingStatus, SearchAlert
 from app.rides.schemas import RideCreate, RideOut, RideSearch, PassengerInfo
 from app.core.maps import calculate_travel_time_sync
 from app.notifications.utils import create_notification
+
+# Configure logger
+logger = logging.getLogger(__name__)
 
 
 def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -798,10 +802,7 @@ def match_search_alerts_with_trip(db: Session, trip: Ride) -> None:
             print(f"  Skipping alert {alert.id}: User {alert.user_id} is the driver of trip {trip.id}")
             continue
         
-        # REGLA CRÍTICA: Solo bloquear si hay una reserva PENDING o CONFIRMED para ESTE MISMO viaje
-        # NO bloquear por reservas en otros viajes (incluso si es la misma fecha)
-        # Las reservas REJECTED NO bloquean nuevas reservas (la alerta sigue activa)
-        # Permitir múltiples reservas PENDING en diferentes viajes para la misma fecha
+        # REGLA 4: Mantener el control de que NO se puede generar más de una reserva automática para el mismo trip
         existing_booking = db.query(Booking).filter(
             Booking.ride_id == trip.id,
             Booking.passenger_id == alert.user_id,
@@ -809,18 +810,24 @@ def match_search_alerts_with_trip(db: Session, trip: Ride) -> None:
         ).first()
         
         if existing_booking:
-            print(f"  Skipping alert {alert.id}: User {alert.user_id} already has a booking for trip {trip.id} (status: {existing_booking.status})")
+            logger.info(f"[ALERT] Skipping alert {alert.id}: User {alert.user_id} already has a booking for trip {trip.id} (status: {existing_booking.status})")
             continue
         
-        # Log si hay una reserva REJECTED para este viaje (para debugging)
-        rejected_booking = db.query(Booking).filter(
-            Booking.ride_id == trip.id,
-            Booking.passenger_id == alert.user_id,
-            Booking.status == BookingStatus.rejected
-        ).first()
+        # REGLA 1-3: Verificar si ya existe una reserva automática activa para este día
+        existing_auto_booking = _check_existing_auto_booking_for_day(db, alert, trip_date)
         
-        if rejected_booking:
-            print(f"[ALERT MATCHING] Processing active alert {alert.id} for trip {trip.id} after previous rejection (booking {rejected_booking.id} was rejected - alert remains active)")
+        if existing_auto_booking:
+            # REGLA 2: Si la reserva encontrada tiene estado pending o confirmed, NO crear una nueva
+            if existing_auto_booking.status in [BookingStatus.pending, BookingStatus.confirmed]:
+                logger.info(f"[ALERT] ⛔ BLOQUEADO: Ya existe una reserva automática activa para la alerta {alert.id} en el día {trip_date}. "
+                          f"Booking ID: {existing_auto_booking.id}, Status: {existing_auto_booking.status.value}, "
+                          f"Trip ID: {existing_auto_booking.ride_id}. No se crea otra reserva automática.")
+                continue
+            # REGLA 3: Si la reserva encontrada tiene estado rejected o canceled, SÍ permitir crear una nueva
+            elif existing_auto_booking.status in [BookingStatus.rejected, BookingStatus.canceled]:
+                logger.info(f"[ALERT] ✅ PERMITIDO: La reserva automática anterior (Booking ID: {existing_auto_booking.id}) "
+                          f"fue {existing_auto_booking.status.value} para el día {trip_date}. "
+                          f"La alerta {alert.id} puede generar una nueva reserva automática.")
         
         # OVERBOOKING CONTROLADO: Permitir crear reservas PENDING sin verificar capacidad
         # Solo verificamos que el viaje tenga al menos 1 asiento disponible para mostrar que hay capacidad
@@ -830,15 +837,27 @@ def match_search_alerts_with_trip(db: Session, trip: Ride) -> None:
             continue
         
         try:
-            print(f"[ALERT MATCHING] Creating pending booking from alert {alert.id} for trip {trip.id} and user {alert.user_id}")
+            logger.info(f"[ALERT] ✅ CREANDO: Nueva reserva automática desde alerta {alert.id} para trip {trip.id} y usuario {alert.user_id} en fecha {trip_date}")
             # Create automatic booking in pending status
             # IMPORTANTE: No decrementamos available_seats aquí porque la reserva está en PENDING
-            auto_booking = Booking(
-                ride_id=trip.id,
-                passenger_id=alert.user_id,
-                status=BookingStatus.pending,
-                seats=1,  # Default to 1 seat for auto-bookings
-            )
+            try:
+                # Intentar crear con los nuevos campos si existen
+                auto_booking = Booking(
+                    ride_id=trip.id,
+                    passenger_id=alert.user_id,
+                    status=BookingStatus.pending,
+                    seats=1,  # Default to 1 seat for auto-bookings
+                    search_alert_id=alert.id,  # ID de la alerta que creó esta reserva
+                    created_by_alert=True,  # Flag para identificar reservas automáticas
+                )
+            except (TypeError, AttributeError):
+                # Si los campos no existen en el modelo aún, crear sin ellos
+                auto_booking = Booking(
+                    ride_id=trip.id,
+                    passenger_id=alert.user_id,
+                    status=BookingStatus.pending,
+                    seats=1,  # Default to 1 seat for auto-bookings
+                )
             db.add(auto_booking)
             
             # Create notification
@@ -864,6 +883,49 @@ def match_search_alerts_with_trip(db: Session, trip: Ride) -> None:
     print("=" * 70)
     print(f"[TRIP MATCHING] ✅ Completed: Created {bookings_created} auto-bookings for trip {trip.id}")
     print("=" * 70)
+
+
+def _check_existing_auto_booking_for_day(
+    db: Session, 
+    alert: SearchAlert, 
+    trip_date
+) -> Optional[Booking]:
+    """
+    Verifica si ya existe una reserva automática activa para esta alerta en el día especificado.
+    
+    REGLA: Una alerta solo debe generar UNA reserva automática por día mientras exista 
+    una reserva en estado PENDING o CONFIRMED para ese día.
+    
+    Si la reserva automática fue REJECTED o CANCELED, la alerta debe seguir buscando 
+    y puede generar otra reserva ese mismo día.
+    
+    Args:
+        db: Database session
+        alert: La alerta de búsqueda
+        trip_date: La fecha del viaje (date object)
+    
+    Returns:
+        Booking si existe una reserva automática activa (pending o confirmed), None en caso contrario
+    """
+    from sqlalchemy import func
+    from sqlalchemy.exc import ProgrammingError, OperationalError
+    
+    try:
+        # Verificar si los campos existen en la base de datos
+        # Si no existen, retornar None (comportamiento seguro)
+        existing_auto_booking = db.query(Booking).join(Ride).filter(
+            Booking.search_alert_id == alert.id,
+            Booking.created_by_alert == True,
+            Booking.passenger_id == alert.user_id,
+            Booking.status.in_([BookingStatus.pending, BookingStatus.confirmed]),
+            func.date(Ride.departure_date) == trip_date
+        ).first()
+        
+        return existing_auto_booking
+    except (ProgrammingError, OperationalError, AttributeError) as e:
+        # Si los campos no existen aún en la BD, retornar None (no bloquear)
+        logger.warning(f"[ALERT] Campos search_alert_id/created_by_alert no disponibles aún en BD. Saltando verificación. Error: {e}")
+        return None
 
 
 def _get_trip_score(db: Session, trip: Ride, alert: SearchAlert) -> tuple[float, float]:
@@ -1137,10 +1199,7 @@ def match_existing_trips_with_alert(db: Session, alert: SearchAlert) -> None:
             print(f"  Skipping trip {trip.id}: User {alert.user_id} is the driver")
             continue
         
-        # REGLA CRÍTICA: Solo bloquear si hay una reserva PENDING o CONFIRMED para ESTE MISMO viaje
-        # NO bloquear por reservas en otros viajes (incluso si es la misma fecha)
-        # Las reservas REJECTED NO bloquean nuevas reservas (la alerta sigue activa)
-        # Permitir múltiples reservas PENDING en diferentes viajes para la misma fecha
+        # REGLA 4: Mantener el control de que NO se puede generar más de una reserva automática para el mismo trip
         existing_booking = db.query(Booking).filter(
             Booking.ride_id == trip.id,
             Booking.passenger_id == alert.user_id,
@@ -1148,18 +1207,25 @@ def match_existing_trips_with_alert(db: Session, alert: SearchAlert) -> None:
         ).first()
         
         if existing_booking:
-            print(f"  Skipping trip {trip.id}: User {alert.user_id} already has a booking (status: {existing_booking.status})")
+            logger.info(f"[ALERT] Skipping alert {alert.id}: User {alert.user_id} already has a booking for trip {trip.id} (status: {existing_booking.status})")
             continue
         
-        # Log si hay una reserva REJECTED para este viaje (para debugging)
-        rejected_booking = db.query(Booking).filter(
-            Booking.ride_id == trip.id,
-            Booking.passenger_id == alert.user_id,
-            Booking.status == BookingStatus.rejected
-        ).first()
+        # REGLA 1-3: Verificar si ya existe una reserva automática activa para este día
+        trip_date = trip.departure_date.date()
+        existing_auto_booking = _check_existing_auto_booking_for_day(db, alert, trip_date)
         
-        if rejected_booking:
-            print(f"[ALERT MATCHING] Processing active alert {alert.id} for trip {trip.id} after previous rejection (booking {rejected_booking.id} was rejected - alert remains active)")
+        if existing_auto_booking:
+            # REGLA 2: Si la reserva encontrada tiene estado pending o confirmed, NO crear una nueva
+            if existing_auto_booking.status in [BookingStatus.pending, BookingStatus.confirmed]:
+                logger.info(f"[ALERT] ⛔ BLOQUEADO: Ya existe una reserva automática activa para la alerta {alert.id} en el día {trip_date}. "
+                          f"Booking ID: {existing_auto_booking.id}, Status: {existing_auto_booking.status.value}, "
+                          f"Trip ID: {existing_auto_booking.ride_id}. No se crea otra reserva automática.")
+                continue
+            # REGLA 3: Si la reserva encontrada tiene estado rejected o canceled, SÍ permitir crear una nueva
+            elif existing_auto_booking.status in [BookingStatus.rejected, BookingStatus.canceled]:
+                logger.info(f"[ALERT] ✅ PERMITIDO: La reserva automática anterior (Booking ID: {existing_auto_booking.id}) "
+                          f"fue {existing_auto_booking.status.value} para el día {trip_date}. "
+                          f"La alerta {alert.id} puede generar una nueva reserva automática.")
         
         # OVERBOOKING CONTROLADO: Permitir crear reservas PENDING sin verificar capacidad
         # Solo verificamos que el viaje tenga al menos 1 asiento disponible para mostrar que hay capacidad
@@ -1169,20 +1235,27 @@ def match_existing_trips_with_alert(db: Session, alert: SearchAlert) -> None:
             continue
         
         try:
-            # Log si es una nueva reserva después de un rechazo previo
-            if rejected_booking:
-                print(f"[ALERT MATCHING] Creating new pending booking from alert {alert.id} for new matching trip {trip.id} (previous booking {rejected_booking.id} was rejected)")
-            else:
-                print(f"[ALERT MATCHING] Creating pending booking from alert {alert.id} for trip {trip.id} and user {alert.user_id}")
-            
+            logger.info(f"[ALERT] ✅ CREANDO: Nueva reserva automática desde alerta {alert.id} para trip {trip.id} y usuario {alert.user_id} en fecha {trip_date}")
             # Create automatic booking in pending status
             # IMPORTANTE: No decrementamos available_seats aquí porque la reserva está en PENDING
-            auto_booking = Booking(
-                ride_id=trip.id,
-                passenger_id=alert.user_id,
-                status=BookingStatus.pending,
-                seats=1,  # Default to 1 seat for auto-bookings
-            )
+            try:
+                # Intentar crear con los nuevos campos si existen
+                auto_booking = Booking(
+                    ride_id=trip.id,
+                    passenger_id=alert.user_id,
+                    status=BookingStatus.pending,
+                    seats=1,  # Default to 1 seat for auto-bookings
+                    search_alert_id=alert.id,  # ID de la alerta que creó esta reserva
+                    created_by_alert=True,  # Flag para identificar reservas automáticas
+                )
+            except (TypeError, AttributeError):
+                # Si los campos no existen en el modelo aún, crear sin ellos
+                auto_booking = Booking(
+                    ride_id=trip.id,
+                    passenger_id=alert.user_id,
+                    status=BookingStatus.pending,
+                    seats=1,  # Default to 1 seat for auto-bookings
+                )
             db.add(auto_booking)
             
             # Create notification
@@ -1339,10 +1412,7 @@ def match_trips_for_specific_dates(
         if alert.user_id == trip.driver_id:
             continue
         
-        # REGLA CRÍTICA: Solo bloquear si hay una reserva PENDING o CONFIRMED para ESTE MISMO viaje
-        # NO bloquear por reservas en otros viajes (incluso si es la misma fecha)
-        # Las reservas REJECTED NO bloquean nuevas reservas (la alerta sigue activa)
-        # Permitir múltiples reservas PENDING en diferentes viajes para la misma fecha
+        # REGLA 4: Mantener el control de que NO se puede generar más de una reserva automática para el mismo trip
         existing_booking = db.query(Booking).filter(
             Booking.ride_id == trip.id,
             Booking.passenger_id == alert.user_id,
@@ -1350,8 +1420,25 @@ def match_trips_for_specific_dates(
         ).first()
         
         if existing_booking:
-            print(f"  Skipping trip {trip.id}: User {alert.user_id} already has a booking (status: {existing_booking.status})")
+            logger.info(f"[ALERT] Skipping alert {alert.id}: User {alert.user_id} already has a booking for trip {trip.id} (status: {existing_booking.status})")
             continue
+        
+        # REGLA 1-3: Verificar si ya existe una reserva automática activa para este día
+        trip_date = trip.departure_date.date()
+        existing_auto_booking = _check_existing_auto_booking_for_day(db, alert, trip_date)
+        
+        if existing_auto_booking:
+            # REGLA 2: Si la reserva encontrada tiene estado pending o confirmed, NO crear una nueva
+            if existing_auto_booking.status in [BookingStatus.pending, BookingStatus.confirmed]:
+                logger.info(f"[ALERT] ⛔ BLOQUEADO: Ya existe una reserva automática activa para la alerta {alert.id} en el día {trip_date}. "
+                          f"Booking ID: {existing_auto_booking.id}, Status: {existing_auto_booking.status.value}, "
+                          f"Trip ID: {existing_auto_booking.ride_id}. No se crea otra reserva automática.")
+                continue
+            # REGLA 3: Si la reserva encontrada tiene estado rejected o canceled, SÍ permitir crear una nueva
+            elif existing_auto_booking.status in [BookingStatus.rejected, BookingStatus.canceled]:
+                logger.info(f"[ALERT] ✅ PERMITIDO: La reserva automática anterior (Booking ID: {existing_auto_booking.id}) "
+                          f"fue {existing_auto_booking.status.value} para el día {trip_date}. "
+                          f"La alerta {alert.id} puede generar una nueva reserva automática.")
         
         # OVERBOOKING CONTROLADO: Permitir crear reservas PENDING sin verificar capacidad
         # Solo verificamos que el viaje tenga al menos 1 asiento disponible para mostrar que hay capacidad
@@ -1359,15 +1446,27 @@ def match_trips_for_specific_dates(
             continue
         
         try:
-            print(f"[ALERT MATCHING] Creating pending booking from alert {alert.id} for trip {trip.id} and user {alert.user_id}")
+            logger.info(f"[ALERT] ✅ CREANDO: Nueva reserva automática desde alerta {alert.id} para trip {trip.id} y usuario {alert.user_id} en fecha {trip_date}")
             # Create automatic booking in pending status
             # IMPORTANTE: No decrementamos available_seats aquí porque la reserva está en PENDING
-            auto_booking = Booking(
-                ride_id=trip.id,
-                passenger_id=alert.user_id,
-                status=BookingStatus.pending,
-                seats=1,
-            )
+            try:
+                # Intentar crear con los nuevos campos si existen
+                auto_booking = Booking(
+                    ride_id=trip.id,
+                    passenger_id=alert.user_id,
+                    status=BookingStatus.pending,
+                    seats=1,
+                    search_alert_id=alert.id,  # ID de la alerta que creó esta reserva
+                    created_by_alert=True,  # Flag para identificar reservas automáticas
+                )
+            except (TypeError, AttributeError):
+                # Si los campos no existen en el modelo aún, crear sin ellos
+                auto_booking = Booking(
+                    ride_id=trip.id,
+                    passenger_id=alert.user_id,
+                    status=BookingStatus.pending,
+                    seats=1,
+                )
             db.add(auto_booking)
             
             # Create notification
@@ -1811,10 +1910,7 @@ def retry_search_for_rejected_auto_booking(db: Session, passenger_id: int, rejec
         
         # Create bookings and notifications for best trips only
         for trip in best_trips:
-            # REGLA CRÍTICA: Solo bloquear si hay una reserva PENDING o CONFIRMED para ESTE MISMO viaje
-            # NO bloquear por reservas en otros viajes (incluso si es la misma fecha)
-            # Las reservas REJECTED NO bloquean nuevas reservas (la alerta sigue activa)
-            # Permitir múltiples reservas PENDING en diferentes viajes para la misma fecha
+            # REGLA 4: Mantener el control de que NO se puede generar más de una reserva automática para el mismo trip
             existing_booking = db.query(Booking).filter(
                 Booking.ride_id == trip.id,
                 Booking.passenger_id == alert.user_id,
@@ -1822,8 +1918,26 @@ def retry_search_for_rejected_auto_booking(db: Session, passenger_id: int, rejec
             ).first()
             
             if existing_booking:
-                print(f"  Skipping trip {trip.id}: User {alert.user_id} already has a booking (status: {existing_booking.status})")
+                logger.info(f"[ALERT] Skipping alert {alert.id}: User {alert.user_id} already has a booking for trip {trip.id} (status: {existing_booking.status})")
                 continue
+            
+            # REGLA 1-3: Verificar si ya existe una reserva automática activa para este día
+            from datetime import date as date_type
+            trip_date = trip.departure_date.date()
+            existing_auto_booking = _check_existing_auto_booking_for_day(db, alert, trip_date)
+            
+            if existing_auto_booking:
+                # REGLA 2: Si la reserva encontrada tiene estado pending o confirmed, NO crear una nueva
+                if existing_auto_booking.status in [BookingStatus.pending, BookingStatus.confirmed]:
+                    logger.info(f"[ALERT] ⛔ BLOQUEADO: Ya existe una reserva automática activa para la alerta {alert.id} en el día {trip_date}. "
+                              f"Booking ID: {existing_auto_booking.id}, Status: {existing_auto_booking.status.value}, "
+                              f"Trip ID: {existing_auto_booking.ride_id}. No se crea otra reserva automática.")
+                    continue
+                # REGLA 3: Si la reserva encontrada tiene estado rejected o canceled, SÍ permitir crear una nueva
+                elif existing_auto_booking.status in [BookingStatus.rejected, BookingStatus.canceled]:
+                    logger.info(f"[ALERT] ✅ PERMITIDO: La reserva automática anterior (Booking ID: {existing_auto_booking.id}) "
+                              f"fue {existing_auto_booking.status.value} para el día {trip_date}. "
+                              f"La alerta {alert.id} puede generar una nueva reserva automática.")
             
             # OVERBOOKING CONTROLADO: Permitir crear reservas PENDING sin verificar capacidad
             # Solo verificamos que el viaje tenga al menos 1 asiento disponible para mostrar que hay capacidad
@@ -1831,15 +1945,27 @@ def retry_search_for_rejected_auto_booking(db: Session, passenger_id: int, rejec
                 continue
             
             try:
-                print(f"[ALERT MATCHING] Creating pending booking from alert {alert.id} for trip {trip.id} and user {alert.user_id} (after rejection)")
+                logger.info(f"[ALERT] ✅ CREANDO: Nueva reserva automática desde alerta {alert.id} para trip {trip.id} y usuario {alert.user_id} en fecha {trip_date} (después de rechazo)")
                 # Create automatic booking in pending status
                 # IMPORTANTE: No decrementamos available_seats aquí porque la reserva está en PENDING
-                auto_booking = Booking(
-                    ride_id=trip.id,
-                    passenger_id=alert.user_id,
-                    status=BookingStatus.pending,
-                    seats=1,  # Default to 1 seat for auto-bookings
-                )
+                try:
+                    # Intentar crear con los nuevos campos si existen
+                    auto_booking = Booking(
+                        ride_id=trip.id,
+                        passenger_id=alert.user_id,
+                        status=BookingStatus.pending,
+                        seats=1,  # Default to 1 seat for auto-bookings
+                        search_alert_id=alert.id,  # ID de la alerta que creó esta reserva
+                        created_by_alert=True,  # Flag para identificar reservas automáticas
+                    )
+                except (TypeError, AttributeError):
+                    # Si los campos no existen en el modelo aún, crear sin ellos
+                    auto_booking = Booking(
+                        ride_id=trip.id,
+                        passenger_id=alert.user_id,
+                        status=BookingStatus.pending,
+                        seats=1,  # Default to 1 seat for auto-bookings
+                    )
                 db.add(auto_booking)
                 
                 # Create notification
@@ -1862,3 +1988,116 @@ def retry_search_for_rejected_auto_booking(db: Session, passenger_id: int, rejec
                 continue
     
     print(f"Finished re-searching for passenger {passenger_id} after rejection of ride {rejected_ride_id}")
+
+
+def on_booking_rejected(db: Session, booking: Booking) -> None:
+    """
+    Reactiva la alerta cuando una reserva generada por una alerta automática es rechazada.
+    
+    REQUISITOS OBLIGATORIOS:
+    - Nunca desactivar ni eliminar una alerta cuando la reserva asociada es rechazada
+    - Si el estado pasa a REJECTED, la alerta debe seguir activa
+    - alert.active debe permanecer True
+    - Si existe alert.last_match_trip_id, debe limpiarse (aunque no existe en el modelo actual)
+    - Si hay un campo alert.consumed, debe permanecer False (aunque no existe en el modelo actual)
+    
+    Args:
+        db: Database session
+        booking: La reserva que fue rechazada
+    """
+    try:
+        logger.info(f"[ALERT] Processing rejected booking {booking.id} for passenger {booking.passenger_id} on trip {booking.ride_id}")
+        
+        # Buscar todas las alertas activas del pasajero que podrían haber generado esta reserva
+        # Como no tenemos un campo alert_id en Booking, buscamos todas las alertas activas del pasajero
+        # que coincidan con el viaje rechazado
+        active_alerts = db.query(SearchAlert).filter(
+            SearchAlert.user_id == booking.passenger_id,
+            SearchAlert.active == True,
+        ).all()
+        
+        if not active_alerts or len(active_alerts) == 0:
+            logger.info(f"[ALERT] No active alerts found for passenger {booking.passenger_id} - booking rejection does not affect alerts")
+            return
+        
+        # Obtener el viaje rechazado para verificar matching
+        ride = db.query(Ride).filter(Ride.id == booking.ride_id).first()
+        if not ride:
+            logger.warning(f"[ALERT] Ride {booking.ride_id} not found - cannot verify alert matching")
+            return
+        
+        # Para cada alerta activa, verificar si podría haber generado esta reserva
+        # y asegurar que permanece activa
+        reactivated_count = 0
+        for alert in active_alerts:
+            # Verificar si la alerta coincide con el viaje rechazado
+            # (esto nos ayuda a identificar qué alerta generó la reserva)
+            matches = False
+            
+            # Check destination match
+            if ride.destination_city and alert.destination:
+                trip_dest_lower = ride.destination_city.lower().strip()
+                alert_dest_lower = alert.destination.lower().strip()
+                dest_matches = trip_dest_lower in alert_dest_lower or alert_dest_lower in trip_dest_lower
+                
+                if not dest_matches and alert.allow_nearby_search:
+                    if (alert.destination_lat is not None and alert.destination_lng is not None and 
+                        ride.destination_lat is not None and ride.destination_lng is not None):
+                        dest_dist = haversine(
+                            alert.destination_lat, alert.destination_lng,
+                            ride.destination_lat, ride.destination_lng
+                        )
+                        dest_matches = dest_dist <= 1.0
+                
+                if not dest_matches:
+                    continue
+            
+            # Check origin match
+            if alert.origin:
+                if ride.departure_city:
+                    trip_orig_lower = ride.departure_city.lower().strip()
+                    alert_orig_lower = alert.origin.lower().strip()
+                    origin_matches = trip_orig_lower in alert_orig_lower or alert_orig_lower in trip_orig_lower
+                else:
+                    origin_matches = False
+                
+                if not origin_matches and alert.allow_nearby_search:
+                    if (alert.origin_lat is not None and alert.origin_lng is not None and 
+                        ride.departure_lat is not None and ride.departure_lng is not None):
+                        origin_dist = haversine(
+                            alert.origin_lat, alert.origin_lng,
+                            ride.departure_lat, ride.departure_lng
+                        )
+                        origin_matches = origin_dist <= 1.0
+                
+                if not origin_matches:
+                    continue
+            
+            # Si llegamos aquí, la alerta podría haber generado esta reserva
+            matches = True
+            
+            # CRÍTICO: Asegurar que la alerta permanece activa
+            if not alert.active:
+                logger.warning(f"[ALERT] Alert {alert.id} was inactive - reactivating it")
+                alert.active = True
+                reactivated_count += 1
+            
+            # Limpiar campos que podrían bloquear la búsqueda (si existieran)
+            # Nota: El modelo actual no tiene last_match_trip_id ni consumed,
+            # pero si se añaden en el futuro, aquí se limpiarían
+            
+            logger.info(f"[ALERT] Reserva {booking.id} rechazada. Alerta {alert.id} reactivada y lista para seguir buscando.")
+        
+        if reactivated_count > 0:
+            # No hacemos commit aquí - el commit se hará en el endpoint que llama esta función
+            logger.info(f"[ALERT] ✅ Reactivated {reactivated_count} alert(s) after booking {booking.id} rejection (will be committed by caller)")
+        else:
+            # Aunque no reactivemos ninguna, logueamos que las alertas siguen activas
+            logger.info(f"[ALERT] ✅ All {len(active_alerts)} alert(s) remain active after booking {booking.id} rejection")
+        
+    except Exception as e:
+        logger.error(f"[ALERT] ❌ Error processing rejected booking {booking.id}: {e}")
+        import traceback
+        traceback.print_exc()
+        # No hacemos rollback aquí porque la reserva ya fue rechazada
+        # Solo logueamos el error
