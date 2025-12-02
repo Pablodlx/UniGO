@@ -7,7 +7,18 @@ import DesktopLayout from "@/components/DesktopLayout";
 import { getToken, listPaymentMethods, deletePaymentMethod, PaymentMethod } from "@/lib/api";
 import PaymentModal from "@/components/PaymentModal";
 import ConfirmModal from "@/components/ConfirmModal";
+import BankAccountForm from "@/components/BankAccountForm";
 import { useToast } from "@/hooks/useToast";
+
+const BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000/api";
+
+interface BankAccountInfo {
+  has_bank_account: boolean;
+  last4?: string;
+  bank_name?: string;
+  country?: string;
+  stripe_account_id?: string;
+}
 
 export default function MyCardsPage() {
   const router = useRouter();
@@ -20,6 +31,9 @@ export default function MyCardsPage() {
     isOpen: false,
     cardId: null,
   });
+  const [bankAccount, setBankAccount] = useState<BankAccountInfo | null>(null);
+  const [showBankAccountModal, setShowBankAccountModal] = useState(false);
+  const [deleteBankModal, setDeleteBankModal] = useState(false);
 
   useEffect(() => {
     const token = getToken();
@@ -29,6 +43,7 @@ export default function MyCardsPage() {
       return;
     }
     loadPaymentMethods();
+    loadBankAccountInfo();
   }, []);
 
   const loadPaymentMethods = async () => {
@@ -41,6 +56,21 @@ export default function MyCardsPage() {
       showToast(error?.message || "Error al cargar las tarjetas");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadBankAccountInfo = async () => {
+    try {
+      const token = getToken();
+      const response = await fetch(`${BASE}/bank-account/info`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setBankAccount(data);
+      }
+    } catch (error) {
+      console.error("Error loading bank account:", error);
     }
   };
 
@@ -69,6 +99,31 @@ export default function MyCardsPage() {
     } catch (error: any) {
       console.error("Error deleting payment method:", error);
       showToast(error?.message || "Error al eliminar la tarjeta");
+    }
+  };
+
+  const handleAddBankAccount = () => {
+    setShowBankAccountModal(true);
+  };
+
+  const handleBankAccountAdded = () => {
+    setShowBankAccountModal(false);
+    loadBankAccountInfo();
+    showToast("✅ Cuenta bancaria configurada correctamente");
+  };
+
+  const handleDeleteBankAccount = async () => {
+    try {
+      const token = getToken();
+      await fetch(`${BASE}/bank-account`, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      setDeleteBankModal(false);
+      showToast("✅ Cuenta bancaria eliminada");
+      loadBankAccountInfo();
+    } catch (error: any) {
+      showToast(error?.message || "Error al eliminar la cuenta bancaria");
     }
   };
 
@@ -234,6 +289,76 @@ export default function MyCardsPage() {
               ))}
             </div>
           )}
+
+          {/* Bank Account Section */}
+          <div className="mt-12">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-gray-800">Cuenta Bancaria (IBAN)</h2>
+              {!bankAccount?.has_bank_account && (
+                <button
+                  onClick={handleAddBankAccount}
+                  className="bg-green-500 text-white px-6 py-3 rounded-xl font-semibold hover:bg-green-600 transition-colors"
+                >
+                  + Añadir IBAN
+                </button>
+              )}
+            </div>
+
+            {loading ? (
+              <div className="text-center py-8 text-gray-500">Cargando...</div>
+            ) : bankAccount?.has_bank_account ? (
+              <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
+                      <span className="text-3xl">🏦</span>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-800 text-lg">Cuenta Bancaria</p>
+                      <p className="text-gray-600">
+                        **** **** **** {bankAccount.last4}
+                      </p>
+                      {bankAccount.bank_name && (
+                        <p className="text-sm text-gray-500">{bankAccount.bank_name}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex space-x-3">
+                    <button
+                      onClick={handleAddBankAccount}
+                      className="text-blue-600 hover:text-blue-700 font-medium px-4 py-2 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors"
+                    >
+                      Editar
+                    </button>
+                    <button
+                      onClick={() => setDeleteBankModal(true)}
+                      className="text-red-600 hover:text-red-700 font-medium px-4 py-2 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+                    >
+                      Eliminar
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <p className="text-sm text-blue-800">
+                    💰 Recibirás el 85% del precio de cada viaje completado en esta cuenta.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-gray-50 rounded-xl p-12 text-center border-2 border-dashed border-gray-300">
+                <div className="text-6xl mb-4">🏦</div>
+                <p className="text-gray-600 text-lg mb-6">
+                  Añade tu IBAN para recibir pagos de los viajes que publiques
+                </p>
+                <button
+                  onClick={handleAddBankAccount}
+                  className="bg-green-500 text-white px-8 py-3 rounded-xl font-semibold hover:bg-green-600 transition-colors"
+                >
+                  Añadir IBAN
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -256,6 +381,49 @@ export default function MyCardsPage() {
         cancelText="Cancelar"
         confirmButtonClass="bg-red-500 hover:bg-red-600"
       />
+
+      {/* Bank Account Modal */}
+      {showBankAccountModal && (
+        <div className="fixed inset-0 bg-black/20 backdrop-blur-md backdrop-saturate-200 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-8 shadow-2xl">
+            <h2 className="text-2xl font-bold text-gray-800 mb-6">
+              {bankAccount?.has_bank_account ? "Editar" : "Añadir"} Cuenta Bancaria
+            </h2>
+            <BankAccountForm
+              onSuccess={handleBankAccountAdded}
+              onCancel={() => setShowBankAccountModal(false)}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Delete Bank Account Confirmation Modal */}
+      {deleteBankModal && (
+        <div className="fixed inset-0 bg-black/20 backdrop-blur-md backdrop-saturate-200 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
+            <h3 className="text-xl font-bold text-gray-800 mb-4">
+              ¿Eliminar cuenta bancaria?
+            </h3>
+            <p className="text-gray-600 mb-6">
+              Esta acción eliminará tu IBAN y no podrás recibir pagos hasta que añadas uno nuevo.
+            </p>
+            <div className="flex space-x-4">
+              <button
+                onClick={() => setDeleteBankModal(false)}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDeleteBankAccount}
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium"
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {ToastComponent}
     </DesktopLayout>

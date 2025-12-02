@@ -185,6 +185,7 @@ export async function getProfile() {
     avatar_url?: string;
     average_rating: number | null;
     rating_count: number;
+    stripe_account_id?: string | null;  // Stripe Connect account ID
   }>(`${BASE}/me/profile`, {
     headers: { ...authHeaders() },
   });

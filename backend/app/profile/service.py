@@ -67,6 +67,7 @@ def get_profile(db: Session, user: User) -> ProfileOut:
         average_rating_display=average_rating_display,
         completed_driver_trips=completed_driver_trips,
         completed_passenger_trips=completed_passenger_trips,
+        stripe_account_id=user.stripe_account_id,  # Include Stripe Connect account ID
     )
 
 

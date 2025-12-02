@@ -660,6 +660,69 @@ def mark_completed_rides(db: Session, user_id: int = None) -> int:
                                     f"[AUTO COMPLETE] Captured payment {payment.id} for ride {ride.id}: "
                                     f"{payment.amount_cents} cents"
                                 )
+                                
+                                # TRANSFER TO DRIVER (Stripe Connect)
+                                try:
+                                    driver = db.query(User).filter(User.id == ride.driver_id).first()
+                                    
+                                    logger.info(f"[AUTO COMPLETE] [TRANSFER] Starting transfer for driver {ride.driver_id}")
+                                    logger.info(f"[AUTO COMPLETE] [TRANSFER] Driver found: {driver is not None}")
+                                    logger.info(f"[AUTO COMPLETE] [TRANSFER] Driver stripe_account_id: {driver.stripe_account_id if driver else 'N/A'}")
+                                    logger.info(f"[AUTO COMPLETE] [TRANSFER] Amount to transfer: {driver_amount_cents} cents")
+                                    
+                                    if driver and driver.stripe_account_id:
+                                        # Verify account status
+                                        try:
+                                            account = stripe.Account.retrieve(driver.stripe_account_id)
+                                            logger.info(f"[AUTO COMPLETE] [TRANSFER] Account: {account.id}")
+                                            logger.info(f"[AUTO COMPLETE] [TRANSFER] Capabilities.transfers: {account.capabilities.get('transfers', {})}")
+                                            logger.info(f"[AUTO COMPLETE] [TRANSFER] Charges enabled: {account.charges_enabled}")
+                                            logger.info(f"[AUTO COMPLETE] [TRANSFER] Payouts enabled: {account.payouts_enabled}")
+                                            
+                                            if account.capabilities.get('transfers') != 'active':
+                                                logger.warning(
+                                                    f"[AUTO COMPLETE] [TRANSFER] Transfers not active: {account.capabilities.get('transfers')}"
+                                                )
+                                        except Exception as account_error:
+                                            logger.error(f"[AUTO COMPLETE] [TRANSFER] Error retrieving account: {account_error}")
+                                        
+                                        # Create transfer
+                                        logger.info(f"[AUTO COMPLETE] [TRANSFER] Creating transfer...")
+                                        transfer = stripe.Transfer.create(
+                                            amount=driver_amount_cents,
+                                            currency="eur",
+                                            destination=driver.stripe_account_id,
+                                            transfer_group=f"trip_{ride.id}",
+                                            metadata={
+                                                "ride_id": str(ride.id),
+                                                "booking_id": str(booking.id),
+                                                "driver_id": str(driver.id),
+                                                "payment_id": str(payment.id),
+                                            }
+                                        )
+                                        logger.info(f"[AUTO COMPLETE] [TRANSFER] ✅ Transfer created!")
+                                        logger.info(f"[AUTO COMPLETE] [TRANSFER] Transfer ID: {transfer.id}")
+                                        logger.info(f"[AUTO COMPLETE] [TRANSFER] Transfer amount: {transfer.amount} cents")
+                                        logger.info(f"[AUTO COMPLETE] [TRANSFER] Transfer destination: {transfer.destination}")
+                                        logger.info(f"[AUTO COMPLETE] [TRANSFER] Transfer status: {transfer.get('status', 'N/A')}")
+                                    else:
+                                        logger.warning(
+                                            f"[AUTO COMPLETE] [TRANSFER] Cannot create transfer: "
+                                            f"driver={driver is not None}, stripe_account_id={driver.stripe_account_id if driver else 'N/A'}"
+                                        )
+                                except stripe.error.StripeError as stripe_error:
+                                    logger.error(
+                                        f"[AUTO COMPLETE] [TRANSFER] ❌ Stripe error: {stripe_error}",
+                                        exc_info=True
+                                    )
+                                    logger.error(f"[AUTO COMPLETE] [TRANSFER] Error type: {type(stripe_error).__name__}")
+                                    logger.error(f"[AUTO COMPLETE] [TRANSFER] Error message: {str(stripe_error)}")
+                                except Exception as transfer_error:
+                                    logger.error(
+                                        f"[AUTO COMPLETE] [TRANSFER] ❌ Unexpected error: {transfer_error}",
+                                        exc_info=True
+                                    )
+                                
                         except Exception as e:
                             logger.error(
                                 f"[AUTO COMPLETE] Error capturing payment for booking {booking.id}: {e}",

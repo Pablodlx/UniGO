@@ -33,6 +33,7 @@ class User(Base):
     # Stripe fields
     stripe_customer_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     stripe_payment_method_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    stripe_account_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)  # Stripe Connect account ID for drivers
     # Blocked trips: list of trip IDs that this user has cancelled and should not see again
     blocked_trip_ids: Mapped[Optional[list[int]]] = mapped_column(ARRAY(Integer), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

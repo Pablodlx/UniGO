@@ -78,3 +78,27 @@ class PaymentMethodOut(BaseModel):
     class Config:
         from_attributes = True
 
+
+class StripeConnectOnboardingRequest(BaseModel):
+    """Request to create Stripe Connect account for driver"""
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str = Field(..., min_length=1, max_length=100)
+    dob_day: int = Field(..., ge=1, le=31)
+    dob_month: int = Field(..., ge=1, le=12)
+    dob_year: int = Field(..., ge=1900, le=2010)
+    iban: str = Field(..., min_length=15, max_length=34)  # IBAN format
+    id_number: str = Field(..., min_length=8, max_length=20)  # DNI/NIE
+    # Address fields (required by Stripe to activate transfers)
+    address_line1: str = Field(..., min_length=1, max_length=200)
+    address_city: str = Field(..., min_length=1, max_length=100)
+    address_postal_code: str = Field(..., min_length=4, max_length=10)
+    # Optional fields
+    phone: Optional[str] = Field(None, min_length=9, max_length=20)
+
+
+class StripeConnectOnboardingResponse(BaseModel):
+    """Response after creating Stripe Connect account"""
+    success: bool
+    message: str
+    stripe_account_id: Optional[str] = None
+

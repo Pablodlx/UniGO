@@ -16,6 +16,7 @@ import { loadGoogleMaps } from "@/utils/googleMapsLoader";
 import { isProfileComplete } from "@/utils/isProfileComplete";
 import { useToast } from "@/hooks/useToast";
 import { getProfile } from "@/lib/api";
+import BankAccountBanner from "@/components/BankAccountBanner";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000/api";
 
@@ -125,7 +126,9 @@ export default function PostRidePage() {
       lat: number;
       lng: number;
     } | null;
+    stripe_account_id?: string | null;
   } | null>(null);
+  const [showBankAccountBanner, setShowBankAccountBanner] = useState(false);
 
   const {
     register,
@@ -164,6 +167,7 @@ export default function PostRidePage() {
         degree: profile.degree,
         course: profile.course,
         home_address: profile.home_address || undefined,
+        stripe_account_id: profile.stripe_account_id || undefined,
       });
     } catch (error) {
       console.error("Error fetching user profile:", error);
@@ -259,6 +263,13 @@ export default function PostRidePage() {
     // Validate profile BEFORE making the request
     if (!isProfileComplete(userProfile)) {
       showToast("Debes completar tu perfil para poder realizar esta acción.");
+      return;
+    }
+
+    // VALIDATE BANK ACCOUNT - Drivers need stripe_account_id to receive payments
+    if (!userProfile?.stripe_account_id) {
+      showToast("Debes configurar tu cuenta bancaria antes de publicar un viaje");
+      setShowBankAccountBanner(true);
       return;
     }
 
@@ -983,6 +994,14 @@ export default function PostRidePage() {
           setSelectedFavorite(null);
         }}
       />
+
+      {/* Bank Account Banner - Only shown when trying to publish without bank account */}
+      {showBankAccountBanner && (
+        <BankAccountBanner
+          onDismiss={() => setShowBankAccountBanner(false)}
+          onConfigure={() => router.push("/my-cards")}
+        />
+      )}
 
       {ToastComponent}
     </DesktopLayout>

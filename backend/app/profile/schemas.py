@@ -45,3 +45,4 @@ class ProfileOut(ProfileBase):
     average_rating_display: str = "No hay valoraciones"  # Display text for average rating
     completed_driver_trips: int = 0
     completed_passenger_trips: int = 0
+    stripe_account_id: str | None = None  # Stripe Connect account ID for drivers

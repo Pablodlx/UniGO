@@ -2,6 +2,7 @@
 Payment router for Stripe integration.
 """
 import logging
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Header, Request
 from sqlalchemy.orm import Session
 from typing import Optional, List
@@ -20,9 +21,12 @@ from app.payments.schemas import (
     CompleteRideRequest,
     CompleteRideResponse,
     PaymentMethodOut,
+    StripeConnectOnboardingRequest,
+    StripeConnectOnboardingResponse,
 )
 from app.payments.models import Payment, PaymentStatus
 from app.payments.service import get_app_commission_percent
+from app.payments.test_utils import add_test_balance, is_test_mode
 
 log = logging.getLogger(__name__)
 
@@ -403,5 +407,189 @@ def delete_payment_method(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete payment method: {str(e)}"
+        )
+
+
+@router.post("/connect/onboarding", response_model=StripeConnectOnboardingResponse)
+def stripe_connect_onboarding(
+    request: StripeConnectOnboardingRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Create a Stripe Connect account for a driver with their bank details.
+    This uses Custom Connect with invisible onboarding.
+    """
+    if not is_stripe_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Payment service is not configured"
+        )
+    
+    # Check if user already has a Stripe Connect account
+    if current_user.stripe_account_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User already has a Stripe Connect account"
+        )
+    
+    try:
+        import stripe
+        
+        # Create Stripe Connect Custom account
+        individual_data = {
+            "first_name": request.first_name,
+            "last_name": request.last_name,
+            "dob": {
+                "day": request.dob_day,
+                "month": request.dob_month,
+                "year": request.dob_year,
+            },
+            "id_number": request.id_number,  # DNI/NIE
+            "email": current_user.email,
+            "address": {
+                "line1": request.address_line1,
+                "city": request.address_city,
+                "postal_code": request.address_postal_code,
+                "country": "ES",
+            },
+        }
+        
+        # Add phone if provided
+        if request.phone:
+            individual_data["phone"] = request.phone
+        
+        account = stripe.Account.create(
+            type="custom",
+            country="ES",  # Spain
+            email=current_user.email,
+            capabilities={
+                "transfers": {"requested": True},
+            },
+            business_type="individual",
+            individual=individual_data,
+            business_profile={
+                "url": "https://unigo.app",  # Required by Stripe
+                "mcc": "4121",  # MCC for taxi/rideshare services
+            },
+            external_account={
+                "object": "bank_account",
+                "country": "ES",
+                "currency": "eur",
+                "account_number": request.iban,
+            },
+            tos_acceptance={
+                "date": int(datetime.now(timezone.utc).timestamp()),
+                "ip": "127.0.0.1",  # You should pass the real IP from the request
+            },
+            metadata={
+                "user_id": str(current_user.id),
+                "email": current_user.email,
+            }
+        )
+        
+        # Save account ID to user
+        current_user.stripe_account_id = account.id
+        db.commit()
+        db.refresh(current_user)
+        
+        log.info(f"Created Stripe Connect account {account.id} for user {current_user.id}")
+        
+        return StripeConnectOnboardingResponse(
+            success=True,
+            message="Cuenta bancaria configurada correctamente",
+            stripe_account_id=account.id
+        )
+        
+    except stripe.error.StripeError as e:
+        log.error(f"Stripe error creating Connect account: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Error de Stripe: {str(e)}"
+        )
+    except Exception as e:
+        log.error(f"Error creating Connect account: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create Connect account: {str(e)}"
+        )
+
+
+# ============================================================================
+# TEMPORARY TEST ENDPOINT - REMOVE IN PRODUCTION
+# ============================================================================
+
+@router.post("/test/add-funds")
+def add_test_funds(
+    amount_eur: Optional[float] = 50.0,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    **TEMPORARY ENDPOINT FOR TESTING ONLY**
+    
+    Adds funds to the platform's Stripe test balance using the special
+    `tok_bypassPending` token. This allows testing Transfers without waiting
+    for payments to settle.
+    
+    This endpoint:
+    - Only works in test mode (sk_test_*)
+    - Should be removed before going to production
+    - Adds funds directly to the platform's available balance
+    
+    Args:
+        amount_eur: Amount to add in euros (default: 50.0)
+    
+    Returns:
+        JSON with charge details and new balance
+    
+    Raises:
+        403: If not in test mode
+        503: If Stripe is not configured
+    """
+    if not is_stripe_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stripe is not configured"
+        )
+    
+    if not is_test_mode():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint can only be used in test mode"
+        )
+    
+    # Validate amount
+    if amount_eur <= 0 or amount_eur > 10000:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Amount must be between 0.01 and 10000 EUR"
+        )
+    
+    amount_cents = int(amount_eur * 100)
+    
+    try:
+        log.info(f"[TEST ENDPOINT] User {current_user.id} requested to add {amount_eur}€ to test balance")
+        
+        result = add_test_balance(amount_cents)
+        
+        log.info(f"[TEST ENDPOINT] ✅ Successfully added {amount_eur}€ to test balance")
+        
+        return {
+            "success": True,
+            "message": f"Successfully added €{amount_eur} to test balance",
+            "details": result
+        }
+        
+    except ValueError as e:
+        log.error(f"[TEST ENDPOINT] Validation error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        log.error(f"[TEST ENDPOINT] Error adding test funds: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to add test funds: {str(e)}"
         )
 
