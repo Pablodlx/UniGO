@@ -336,8 +336,6 @@ def get_ride_history(
         # Include if the ride has passed (based on arrival time) OR if it's canceled
         if check_datetime < now or not ride.is_active:
             driver = db.query(User).filter(User.id == ride.driver_id).first()
-            # Determine status: cancelled if not active, completed if past and active
-            status = "cancelled" if not ride.is_active else "completed"
             
             # For driver: find all bookings to rate passengers
             # Get all confirmed bookings for this ride (driver can rate each passenger)
@@ -347,6 +345,18 @@ def get_ride_history(
                     Booking.status == BookingStatus.confirmed
                 )
             ).all()
+            
+            # Determine status: If ride has confirmed bookings and has passed, it's completed
+            # Only mark as cancelled if ride was cancelled AND has no confirmed bookings
+            if not ride.is_active and len(bookings) == 0:
+                # Ride was cancelled and had no confirmed passengers
+                status = "cancelled"
+            elif check_datetime < now:
+                # Ride has passed (with or without passengers) -> completed
+                status = "completed"
+            else:
+                # Default to completed
+                status = "completed"
             
             # Build passengers array for this ride
             passengers = []
@@ -457,14 +467,22 @@ def get_ride_history(
             is_canceled = booking.status == BookingStatus.canceled
             if check_datetime < now or not ride.is_active or is_rejected or is_canceled:
                 driver = db.query(User).filter(User.id == ride.driver_id).first()
-                # Determine status: cancelled if booking is canceled or ride not active, rejected if booking is rejected, completed if past and active
-                if is_canceled:
+                # Determine status: ALWAYS prioritize trip status over booking status
+                # Trip status is the source of truth
+                if not ride.is_active:
+                    # Trip was cancelled by driver
                     status = "cancelled"
+                elif check_datetime < now:
+                    # Trip has passed and is still active -> completed
+                    status = "completed"
                 elif is_rejected:
+                    # Booking was rejected (but trip is still active/upcoming)
                     status = "rejected"
-                elif not ride.is_active:
+                elif is_canceled:
+                    # Booking was cancelled by passenger (but trip might still be active)
                     status = "cancelled"
                 else:
+                    # Default to completed for past rides
                     status = "completed"
                 
                 # For passenger: check if they've rated the driver

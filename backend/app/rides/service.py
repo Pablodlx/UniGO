@@ -590,10 +590,12 @@ def search_rides(db: Session, search_params: RideSearch, exclude_booked_by_user_
 def mark_completed_rides(db: Session, user_id: int = None) -> int:
     """
     Mark rides as completed (is_active=False) if their departure time has passed.
+    Also captures pending payments for confirmed bookings.
     If user_id is provided, only mark rides for that user. Otherwise, mark all past rides.
     Returns the number of rides marked as completed.
     """
     from datetime import timezone
+    from app.auth.models import Booking, BookingStatus
     
     now = datetime.now(timezone.utc)
     
@@ -612,13 +614,69 @@ def mark_completed_rides(db: Session, user_id: int = None) -> int:
             if departure_datetime < now:
                 ride.is_active = False
                 marked_count += 1
+                
+                # CAPTURE PAYMENTS for confirmed bookings (NEW: auto-capture when ride completes)
+                try:
+                    confirmed_bookings = db.query(Booking).filter(
+                        Booking.ride_id == ride.id,
+                        Booking.status == BookingStatus.confirmed
+                    ).all()
+                    
+                    for booking in confirmed_bookings:
+                        try:
+                            from app.payments.models import Payment, PaymentStatus
+                            from app.payments.service import get_app_commission_percent
+                            import stripe
+                            
+                            if not stripe.api_key:
+                                continue
+                            
+                            # Get payment record
+                            payment = db.query(Payment).filter(Payment.booking_id == booking.id).first()
+                            if not payment or not payment.stripe_payment_intent_id:
+                                continue
+                            
+                            # Check if already captured
+                            if payment.status == PaymentStatus.succeeded:
+                                continue
+                            
+                            # Capture PaymentIntent
+                            pi = stripe.PaymentIntent.retrieve(payment.stripe_payment_intent_id)
+                            if pi.status == "requires_capture":
+                                stripe.PaymentIntent.capture(payment.stripe_payment_intent_id)
+                                
+                                # Calculate app commission and driver amount
+                                commission_percent = get_app_commission_percent()
+                                app_fee_cents = int(payment.amount_cents * commission_percent)
+                                driver_amount_cents = payment.amount_cents - app_fee_cents
+                                
+                                # Update payment record
+                                payment.status = PaymentStatus.succeeded
+                                payment.app_fee_cents = app_fee_cents
+                                payment.driver_amount_cents = driver_amount_cents
+                                payment.captured_at = datetime.now(timezone.utc)
+                                
+                                logger.info(
+                                    f"[AUTO COMPLETE] Captured payment {payment.id} for ride {ride.id}: "
+                                    f"{payment.amount_cents} cents"
+                                )
+                        except Exception as e:
+                            logger.error(
+                                f"[AUTO COMPLETE] Error capturing payment for booking {booking.id}: {e}",
+                                exc_info=True
+                            )
+                            # Continue with other bookings even if one fails
+                except Exception as e:
+                    logger.error(f"[AUTO COMPLETE] Error processing payments for ride {ride.id}: {e}")
+                    # Don't fail the ride completion if payment capture fails
+                
         except Exception as e:
             logger.warning(f"Error marking ride {ride.id} as completed: {e}")
             continue
     
     if marked_count > 0:
         db.commit()
-        logger.info(f"Marked {marked_count} ride(s) as completed")
+        logger.info(f"Marked {marked_count} ride(s) as completed and captured payments")
     
     return marked_count
 
