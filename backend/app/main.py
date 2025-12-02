@@ -25,6 +25,7 @@ from app.users.router import router as users_router
 
 # Import all models to ensure they're registered
 from app.auth.models import User, Ride, Booking, EmailCode, Rating, FavoriteRide, Message, TripGroupMessage, Notification, SearchAlert
+from app.payments.models import Payment  # Import Payment model
 from app.db.session import Base, engine
 
 # Create all tables if they don't exist (development only)
@@ -181,3 +182,5 @@ app.include_router(bookings_router, prefix="/api")
 app.include_router(notifications_router, prefix="/api")
 app.include_router(search_alerts_router, prefix="/api")
 app.include_router(users_router, prefix="/api")
+from app.payments.router import router as payments_router
+app.include_router(payments_router, prefix="/api")

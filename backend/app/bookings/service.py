@@ -71,6 +71,26 @@ def cancel_booking_from_passenger(
                 log.error(f"[CANCEL BOOKING] Driver not found for ride {ride.id}")
                 return
             
+            # MANEJAR PENALIZACIONES DE PAGO (nuevo - integración Stripe)
+            # Si existe un pago, aplicar penalización según tiempo hasta el viaje
+            penalty_cents = None
+            try:
+                from app.payments.models import Payment
+                from app.payments.service import handle_passenger_cancellation
+                from app.core.stripe import is_stripe_enabled
+                
+                if is_stripe_enabled():
+                    payment = db.query(Payment).filter(Payment.booking_id == booking.id).first()
+                    if payment:
+                        penalty_cents, penalty_error = handle_passenger_cancellation(db, booking, ride, payment)
+                        if penalty_error:
+                            log.error(f"[CANCEL BOOKING] [PAYMENT] Error handling penalty: {penalty_error}")
+                        elif penalty_cents is not None:
+                            log.info(f"[CANCEL BOOKING] [PAYMENT] Applied penalty of {penalty_cents} cents")
+            except Exception as e:
+                # No fallar la cancelación si falla el manejo de penalización
+                log.error(f"[CANCEL BOOKING] [PAYMENT] Error in penalty handling: {e}", exc_info=True)
+            
             # Create notification for the driver
             notification_message = (
                 f"El pasajero {passenger_name} "
@@ -159,6 +179,39 @@ def cancel_booking_from_passenger(
             # Booking was not confirmed, just update status and commit
             db.commit()
             db.refresh(booking)
+        
+        # Add trip to user's blocked trips list (so it doesn't appear in search results)
+        try:
+            passenger = db.query(User).filter(User.id == booking.passenger_id).first()
+            if passenger:
+                # Check if blocked_trip_ids attribute exists (in case migration hasn't run yet)
+                if hasattr(passenger, 'blocked_trip_ids'):
+                    # Initialize blocked_trip_ids if None
+                    current_blocked = list(passenger.blocked_trip_ids) if passenger.blocked_trip_ids else []
+                    
+                    # Add trip_id to blocked list if not already there
+                    trip_id = ride.id
+                    if trip_id not in current_blocked:
+                        current_blocked.append(trip_id)
+                        # Assign new list to trigger SQLAlchemy change detection
+                        passenger.blocked_trip_ids = current_blocked
+                        db.commit()
+                        db.refresh(passenger)
+                        log.info(
+                            f"[CANCEL BOOKING] [BLOCKED TRIPS] Added trip {trip_id} to blocked_trip_ids "
+                            f"for user {passenger.id} (booking {booking.id} cancelled)"
+                        )
+                else:
+                    log.warning(
+                        f"[CANCEL BOOKING] [BLOCKED TRIPS] blocked_trip_ids field not available yet "
+                        f"(migration may not have run). Skipping block."
+                    )
+        except Exception as e:
+            # Don't fail the cancellation if blocking fails, just log
+            log.error(
+                f"[CANCEL BOOKING] [BLOCKED TRIPS] Error adding trip to blocked list: {e}",
+                exc_info=True
+            )
         
         log.info(
             f"[CANCEL BOOKING] ✅ Booking {booking.id} cancelado exitosamente "

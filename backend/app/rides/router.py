@@ -1,5 +1,5 @@
 from typing import List
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Header, BackgroundTasks
@@ -13,6 +13,7 @@ from app.rides.schemas import RideCreate, RideOut, RideSearch, Passenger, RouteI
 from app.rides import favorites_service
 from app.rides.favorites_schemas import FavoriteRideCreate, FavoriteRideOut
 from app.utils.profile_validation import is_profile_complete
+from app.payments.schemas import CompleteRideRequest, CompleteRideResponse
 
 router = APIRouter(prefix="/rides", tags=["Rides"])
 
@@ -788,6 +789,131 @@ def cancel_booking(
         db.rollback()
         print(f"Error canceling booking: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to cancel booking: {str(e)}")
+
+
+@router.post("/{ride_id}/complete", response_model=CompleteRideResponse)
+def complete_ride(
+    ride_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Mark a ride as completed and capture all pending payments.
+    Only the driver can complete their own ride.
+    
+    This will:
+    - Mark ride as inactive (is_active=False)
+    - Capture all PaymentIntents for confirmed bookings
+    - Calculate and save app commission and driver amounts
+    """
+    ride = db.query(Ride).filter(Ride.id == ride_id).first()
+    if not ride:
+        raise HTTPException(status_code=404, detail="Ride not found")
+    
+    # Check if user is the driver
+    if ride.driver_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the driver can complete their own ride"
+        )
+    
+    try:
+        # Mark ride as inactive
+        ride.is_active = False
+        
+        # Get all confirmed bookings for this ride
+        confirmed_bookings = db.query(Booking).filter(
+            Booking.ride_id == ride_id,
+            Booking.status == BookingStatus.confirmed
+        ).all()
+        
+        total_captured = 0
+        total_app_fee = 0
+        total_driver_amount = 0
+        
+        # Capture payments for each confirmed booking
+        for booking in confirmed_bookings:
+            try:
+                from app.payments.models import Payment, PaymentStatus
+                from app.payments.service import get_app_commission_percent
+                
+                import stripe
+                if not stripe.api_key:
+                    log.info(f"[COMPLETE RIDE] Stripe not enabled, skipping payment capture for booking {booking.id}")
+                    continue
+                
+                # Get payment record
+                payment = db.query(Payment).filter(Payment.booking_id == booking.id).first()
+                if not payment or not payment.stripe_payment_intent_id:
+                    log.info(f"[COMPLETE RIDE] No payment found for booking {booking.id}, skipping")
+                    continue
+                
+                # Check if already captured
+                if payment.status == PaymentStatus.succeeded:
+                    log.info(f"[COMPLETE RIDE] Payment {payment.id} already captured")
+                    continue
+                
+                # Capture PaymentIntent
+                pi = stripe.PaymentIntent.retrieve(payment.stripe_payment_intent_id)
+                if pi.status == "requires_capture":
+                    captured_pi = stripe.PaymentIntent.capture(payment.stripe_payment_intent_id)
+                    
+                    # Calculate app commission and driver amount
+                    commission_percent = get_app_commission_percent()
+                    app_fee_cents = int(payment.amount_cents * commission_percent)
+                    driver_amount_cents = payment.amount_cents - app_fee_cents
+                    
+                    # Update payment record
+                    payment.status = PaymentStatus.succeeded
+                    payment.app_fee_cents = app_fee_cents
+                    payment.driver_amount_cents = driver_amount_cents
+                    payment.captured_at = datetime.now(timezone.utc)
+                    
+                    total_captured += payment.amount_cents
+                    total_app_fee += app_fee_cents
+                    total_driver_amount += driver_amount_cents
+                    
+                    log.info(
+                        f"[COMPLETE RIDE] Captured payment {payment.id}: "
+                        f"{payment.amount_cents} cents (app_fee: {app_fee_cents}, driver: {driver_amount_cents})"
+                    )
+                else:
+                    log.warning(
+                        f"[COMPLETE RIDE] PaymentIntent {payment.stripe_payment_intent_id} "
+                        f"status is {pi.status}, cannot capture"
+                    )
+                    
+            except Exception as e:
+                log.error(
+                    f"[COMPLETE RIDE] Error capturing payment for booking {booking.id}: {e}",
+                    exc_info=True
+                )
+                # Continue with other bookings even if one fails
+        
+        # Commit all changes
+        db.commit()
+        db.refresh(ride)
+        
+        log.info(
+            f"[COMPLETE RIDE] ✅ Ride {ride_id} completed. "
+            f"Captured {len([b for b in confirmed_bookings if db.query(Payment).filter(Payment.booking_id == b.id).first()])} payments"
+        )
+        
+        return CompleteRideResponse(
+            success=True,
+            message=f"Ride completed successfully. Captured {len(confirmed_bookings)} payment(s).",
+            payment_captured=total_captured > 0,
+            app_fee_cents=total_app_fee if total_captured > 0 else None,
+            driver_amount_cents=total_driver_amount if total_captured > 0 else None,
+        )
+        
+    except Exception as e:
+        db.rollback()
+        log.error(f"[COMPLETE RIDE] ❌ Error completing ride {ride_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to complete ride: {str(e)}"
+        )
 
 
 @router.get("/{ride_id}/passengers", response_model=List[Passenger])

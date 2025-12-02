@@ -8,9 +8,11 @@ import { getToken, getMySearchAlerts, deleteSearchAlert, SearchAlert, updateSear
 import AutoSearchModal from "@/components/AutoSearchModal";
 import ConfirmModal from "@/components/ConfirmModal";
 import ProfileIncompleteModal from "@/components/ProfileIncompleteModal";
+import CardSelectorModal from "@/components/CardSelectorModal";
 import { useToast } from "@/hooks/useToast";
 import AddressAutocomplete, { AddressValue } from "@/components/AddressAutocomplete";
 import { isProfileComplete } from "@/utils/isProfileComplete";
+import { listPaymentMethods } from "@/lib/api";
 
 export default function MyAlertsPage() {
   const router = useRouter();
@@ -39,6 +41,8 @@ export default function MyAlertsPage() {
     } | null;
   } | null>(null);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showCardSelector, setShowCardSelector] = useState(false);
+  const [pendingAlertAction, setPendingAlertAction] = useState<(() => void) | null>(null);
 
   useEffect(() => {
     const token = getToken();
@@ -188,6 +192,13 @@ export default function MyAlertsPage() {
                   </svg>
                   <span>Mis Alertas</span>
                 </button>
+                <Link href="/my-cards" className="flex items-center space-x-2 text-gray-600 hover:text-orange-600 transition-colors font-medium">
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
+                    <path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clipRule="evenodd" />
+                  </svg>
+                  <span>Mis Tarjetas</span>
+                </Link>
                 <button
                   onClick={handleProfileClick}
                   className="flex items-center space-x-2 text-gray-600 hover:text-orange-600 transition-colors font-medium cursor-pointer"
@@ -215,13 +226,27 @@ export default function MyAlertsPage() {
             <div className="flex items-center justify-between mb-6">
               <h1 className="text-4xl font-bold text-gray-800">Mis Alertas</h1>
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (!isProfileComplete(userProfile)) {
                     setShowProfileModal(true);
                     return;
                   }
-                  setEditingAlert(null);
-                  setEditModalOpen(true);
+                  
+                  // Validate payment methods before creating alert
+                  try {
+                    const cards = await listPaymentMethods();
+                    if (cards.length === 0) {
+                      showToast("Necesitas un método de pago antes de crear una alerta. Añade una tarjeta en 'Mis Tarjetas'.", "error");
+                      router.push("/my-cards");
+                      return;
+                    }
+                    
+                    setEditingAlert(null);
+                    setEditModalOpen(true);
+                  } catch (error: any) {
+                    console.error("Error checking payment methods:", error);
+                    showToast("Error al verificar métodos de pago. Por favor, intenta de nuevo.", "error");
+                  }
                 }}
                 className="bg-orange-500 text-white px-6 py-3 rounded-lg font-semibold hover:bg-orange-600 transition-colors flex items-center space-x-2 shadow-md"
               >

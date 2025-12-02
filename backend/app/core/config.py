@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     
     # --- Google Maps API ---
     google_maps_api_key: str | None = None
+    
+    # --- Stripe Configuration ---
+    stripe_secret_key: str | None = None
+    stripe_public_key: str | None = None
+    stripe_webhook_secret: str | None = None
+    app_commission_percent: float = 15.0  # Commission percentage (15%)
 
     # Opción simple (recomendada si arrancas desde backend/)
     model_config = SettingsConfigDict(

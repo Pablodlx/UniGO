@@ -544,6 +544,74 @@ export async function getUserReviews(userId: number): Promise<ReviewDetail[]> {
   });
 }
 
+// --- Payments (Stripe) ---
+export interface SetupIntentResponse {
+  client_secret: string;
+  setup_intent_id: string;
+}
+
+export interface ConfirmSetupIntentRequest {
+  setup_intent_id: string;
+  payment_method_id: string;
+  customer_id?: string;
+}
+
+export interface ConfirmSetupIntentResponse {
+  success: boolean;
+  customer_id: string;
+  payment_method_id: string;
+}
+
+export async function createSetupIntent(): Promise<SetupIntentResponse> {
+  return fetchJson<SetupIntentResponse>(`${BASE}/payments/create-setup-intent`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+}
+
+export async function confirmSetupIntent(data: ConfirmSetupIntentRequest): Promise<ConfirmSetupIntentResponse> {
+  return fetchJson<ConfirmSetupIntentResponse>(`${BASE}/payments/confirm-setup-intent`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function completeRide(rideId: number): Promise<{ success: boolean; message: string; payment_captured: boolean }> {
+  return fetchJson(`${BASE}/rides/${rideId}/complete`, {
+    method: "POST",
+    headers: { ...authHeaders() },
+  });
+}
+
+// --- Payment Methods (Cards) ---
+export interface PaymentMethod {
+  id: string;
+  type: string;
+  card?: {
+    last4: string;
+    brand: string;
+    exp_month: number;
+    exp_year: number;
+  };
+  is_default: boolean;
+  created?: number;
+}
+
+export async function listPaymentMethods(): Promise<PaymentMethod[]> {
+  return fetchJson<PaymentMethod[]>(`${BASE}/payments/methods`, {
+    headers: { ...authHeaders() },
+  });
+}
+
+export async function deletePaymentMethod(paymentMethodId: string): Promise<{ success: boolean; message: string }> {
+  return fetchJson(`${BASE}/payments/method/${paymentMethodId}`, {
+    method: "DELETE",
+    headers: { ...authHeaders() },
+  });
+}
+
 // --- Favorite Rides ---
 export interface FavoriteRide {
   id: number;

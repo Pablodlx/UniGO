@@ -106,6 +106,12 @@ MAIL_SSL_TLS=False
 
 ALLOWED_EMAIL_DOMAINS=ugr.es, us.es, uma.es, ucm.es, upm.es, uab.cat, ub.edu, uoc.edu, upc.edu, upf.edu, ehu.eus, unizar.es, upna.es, uva.es, uclm.es, uniovi.es, unileon.es, unican.es, uib.es, ulpgc.es, um.es, upct.es, uex.es
 
+# Stripe Payment Configuration (optional)
+# STRIPE_SECRET_KEY=sk_test_xxx
+# STRIPE_PUBLIC_KEY=pk_test_xxx
+# STRIPE_WEBHOOK_SECRET=whsec_xxx
+# APP_COMMISSION_PERCENT=15
+
 **Guardamos el archivo y volvemos al directorio principal:**
 
 `cd ..`

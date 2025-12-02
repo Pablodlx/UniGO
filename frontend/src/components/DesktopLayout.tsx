@@ -68,6 +68,17 @@ export default function DesktopLayout({ children, className = "", showSidebar = 
       path: "/my-alerts",
     },
     {
+      id: "cards",
+      label: "Mis Tarjetas",
+      icon: (
+        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
+          <path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clipRule="evenodd" />
+        </svg>
+      ),
+      path: "/my-cards",
+    },
+    {
       id: "profile",
       label: "Perfil",
       icon: (
@@ -89,8 +100,8 @@ export default function DesktopLayout({ children, className = "", showSidebar = 
   };
 
   const handleNavClick = (item: any) => {
-    // Make profile and alerts buttons functional
-    if (item.id === "profile" || item.id === "alerts") {
+    // Make profile, alerts, and cards buttons functional
+    if (item.id === "profile" || item.id === "alerts" || item.id === "cards") {
       router.push(item.path);
     }
     // Other buttons do nothing
@@ -113,8 +124,8 @@ export default function DesktopLayout({ children, className = "", showSidebar = 
                     isActive(item.path) 
                       ? "bg-teal-50 text-teal-700 border border-teal-200" 
                       : "text-gray-600 hover:bg-gray-50"
-                  } ${item.id !== "profile" && item.id !== "alerts" ? "opacity-50 cursor-not-allowed" : ""}`}
-                  disabled={item.id !== "profile" && item.id !== "alerts"}
+                  } ${item.id !== "profile" && item.id !== "alerts" && item.id !== "cards" ? "opacity-50 cursor-not-allowed" : ""}`}
+                  disabled={item.id !== "profile" && item.id !== "alerts" && item.id !== "cards"}
                 >
                   {item.icon}
                   <span className="font-medium">{item.label}</span>

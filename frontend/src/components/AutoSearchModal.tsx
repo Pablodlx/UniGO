@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import AddressAutocomplete, { AddressValue } from "./AddressAutocomplete";
+import CardSelectorModal from "./CardSelectorModal";
+import { listPaymentMethods } from "@/lib/api";
 
 interface AutoSearchModalProps {
   isOpen: boolean;
@@ -35,6 +37,9 @@ export default function AutoSearchModal({
   const [flexibilityMinutes, setFlexibilityMinutes] = useState<number>(30);
   const [allowNearbySearch, setAllowNearbySearch] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showCardSelector, setShowCardSelector] = useState(false);
+  const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<string | null>(null);
+  const [pendingSubmit, setPendingSubmit] = useState<boolean>(false);
   const [errors, setErrors] = useState<{
     origin?: string;
     destination?: string;
@@ -98,6 +103,41 @@ export default function AutoSearchModal({
       return;
     }
 
+    // VALIDATE PAYMENT METHODS - Always check before creating alert
+    // If payment method is explicitly provided (from card selector), use it directly
+    if (selectedPaymentMethodId) {
+      // Payment method already selected, proceed with alert creation
+      await createAlert();
+      return;
+    }
+
+    // Always check payment methods before allowing alert creation
+    try {
+      const cards = await listPaymentMethods();
+      
+      if (cards.length === 0) {
+        if (onError) {
+          onError("Debes añadir un método de pago antes de continuar");
+        }
+        return;
+      } else if (cards.length === 1) {
+        // Use the only card automatically, proceed with creation
+        setSelectedPaymentMethodId(cards[0].id);
+        await createAlert();
+      } else {
+        // Multiple cards: always show selector modal to choose
+        setPendingSubmit(true);
+        setShowCardSelector(true);
+      }
+    } catch (error: any) {
+      console.error("Error checking payment methods:", error);
+      if (onError) {
+        onError("Error al verificar métodos de pago. Por favor, intenta de nuevo.");
+      }
+    }
+  };
+
+  const createAlert = async () => {
     setIsSubmitting(true);
 
     try {
@@ -126,6 +166,17 @@ export default function AutoSearchModal({
       }
     } finally {
       setIsSubmitting(false);
+      setPendingSubmit(false);
+    }
+  };
+
+  const handleCardSelected = async (paymentMethodId: string) => {
+    setSelectedPaymentMethodId(paymentMethodId);
+    setShowCardSelector(false);
+    // Proceed with alert creation after card selection
+    if (pendingSubmit) {
+      setPendingSubmit(false);
+      await createAlert();
     }
   };
 
@@ -350,6 +401,18 @@ export default function AutoSearchModal({
           </form>
         </div>
       </div>
+
+      {/* Card Selector Modal */}
+      <CardSelectorModal
+        isOpen={showCardSelector}
+        onClose={() => {
+          setShowCardSelector(false);
+          setPendingSubmit(false);
+          setSelectedPaymentMethodId(null);
+        }}
+        onSelect={handleCardSelected}
+        title="Elige tu método de pago"
+      />
     </div>
   );
 }

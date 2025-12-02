@@ -460,12 +460,20 @@ def search_rides(db: Session, search_params: RideSearch, exclude_booked_by_user_
     
     # Get booked ride IDs if user ID is provided
     booked_ride_ids = set()
+    blocked_trip_ids = set()
     if exclude_booked_by_user_id:
-        from app.auth.models import Booking
+        from app.auth.models import Booking, User
+        
+        # Get booked rides
         booked_ride_ids = {b.ride_id for b in db.query(Booking).filter(
             Booking.passenger_id == exclude_booked_by_user_id,
             Booking.status != "canceled"
         ).all()}
+        
+        # Get blocked trip IDs (trips user has cancelled and should not see again)
+        user = db.query(User).filter(User.id == exclude_booked_by_user_id).first()
+        if user and hasattr(user, 'blocked_trip_ids') and user.blocked_trip_ids:
+            blocked_trip_ids = set(user.blocked_trip_ids)
     
     # Get current time in UTC for filtering past rides
     now = datetime.now(timezone.utc)
@@ -495,10 +503,10 @@ def search_rides(db: Session, search_params: RideSearch, exclude_booked_by_user_
     # Order by departure date (soonest first)
     exact_rides = query.order_by(Ride.departure_date.asc(), Ride.departure_time.asc()).all()
     
-    # Filter out booked rides and past rides (departure_time < now)
+    # Filter out booked rides, blocked trips, and past rides (departure_time < now)
     exact_rides = [
         r for r in exact_rides 
-        if r.id not in booked_ride_ids and calculate_departure_datetime(r) > now
+        if r.id not in booked_ride_ids and r.id not in blocked_trip_ids and calculate_departure_datetime(r) > now
     ]
     
     # Convert to RideOut
@@ -540,10 +548,10 @@ def search_rides(db: Session, search_params: RideSearch, exclude_booked_by_user_
         
         all_nearby_rides = nearby_query.order_by(Ride.departure_date.asc(), Ride.departure_time.asc()).all()
         
-        # Filter out booked rides and past rides (departure_time < now)
+        # Filter out booked rides, blocked trips, and past rides (departure_time < now)
         all_nearby_rides = [
             r for r in all_nearby_rides 
-            if r.id not in booked_ride_ids and calculate_departure_datetime(r) > now
+            if r.id not in booked_ride_ids and r.id not in blocked_trip_ids and calculate_departure_datetime(r) > now
         ]
         
         # Check distance for each ride

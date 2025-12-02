@@ -7,6 +7,7 @@ import NotificationHookWrapper from "@/components/NotificationHookWrapper";
 import PendingBookingsWrapper from "@/components/PendingBookingsWrapper";
 import SystemNotificationBanner from "@/components/SystemNotificationBanner";
 import ChatNotificationsBannerPolling from "@/components/ChatNotificationsBannerPolling";
+import StripeProviderWrapper from "@/components/StripeProviderWrapper";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -34,14 +35,16 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <NotificationProvider>
-          {children}
-          <NotificationHookWrapper />
-          {/* <NotificationPanel /> */}
-          <PendingBookingsWrapper />
-          <SystemNotificationBanner />
-          <ChatNotificationsBannerPolling />
-        </NotificationProvider>
+        <StripeProviderWrapper>
+          <NotificationProvider>
+            {children}
+            <NotificationHookWrapper />
+            {/* <NotificationPanel /> */}
+            <PendingBookingsWrapper />
+            <SystemNotificationBanner />
+            <ChatNotificationsBannerPolling />
+          </NotificationProvider>
+        </StripeProviderWrapper>
       </body>
     </html>
   );

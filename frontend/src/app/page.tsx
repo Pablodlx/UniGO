@@ -13,6 +13,7 @@ import { isProfileComplete } from "@/utils/isProfileComplete";
 import { useToast } from "@/hooks/useToast";
 import AutoSearchModal from "@/components/AutoSearchModal";
 import ProfileIncompleteModal from "@/components/ProfileIncompleteModal";
+import { listPaymentMethods, PaymentMethod } from "@/lib/api";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000/api";
 
@@ -27,6 +28,7 @@ export default function Home() {
   const [searchParams, setSearchParams] = useState<{from: AddressValue | null, to: AddressValue | null, date: string} | null>(null);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [bookingSuccess, setBookingSuccess] = useState(false);
+  const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<string | null>(null);
   const [fromAddress, setFromAddress] = useState<AddressValue | null>(null);
   const [toAddress, setToAddress] = useState<AddressValue | null>(null);
   const [fromError, setFromError] = useState<string>("");
@@ -262,6 +264,44 @@ export default function Home() {
       return;
     }
 
+    // VALIDATE PAYMENT METHODS - Must block if no cards (same as alerts)
+    try {
+      const cards = await listPaymentMethods();
+      console.log("[RESERVATION] Payment methods check:", cards?.length || 0, "cards found");
+      
+      // CRITICAL: Block reservation if no cards
+      if (!cards || cards.length === 0) {
+        console.log("[RESERVATION] ❌ NO CARDS - BLOCKING RESERVATION");
+        showToast("Debes añadir un método de pago antes de reservar un viaje");
+        router.push("/my-cards");
+        return; // STOP HERE - DO NOT CONTINUE
+      }
+      
+      console.log("[RESERVATION] ✅ CARDS FOUND - Proceeding with booking");
+      
+      // If we have cards, proceed with booking
+      let cardToUse = cards[0];
+      const defaultCard = cards.find(card => card.is_default);
+      if (defaultCard) {
+        cardToUse = defaultCard;
+      }
+      
+      await proceedWithBooking(cardToUse.id);
+    } catch (error: any) {
+      console.error("[RESERVATION] ❌ ERROR checking payment methods:", error);
+      // On error, block reservation
+      showToast("Debes añadir un método de pago antes de reservar un viaje");
+      router.push("/my-cards");
+      return; // STOP HERE - DO NOT CONTINUE
+    }
+  };
+
+  const proceedWithBooking = async (paymentMethodId: string) => {
+    if (!selectedRide) return;
+    
+    const token = getToken();
+    if (!token) return;
+
     try {
       console.log("Booking ride:", selectedRide.id);
       const response = await fetch(`${BASE}/rides/${selectedRide.id}/book?seats=1`, {
@@ -272,7 +312,7 @@ export default function Home() {
       });
 
       if (response.ok) {
-        // Show success message
+        // Booking created successfully
         setBookingSuccess(true);
         // Update available seats locally
         const updatedRide = { ...selectedRide, available_seats: selectedRide.available_seats - 1 };
@@ -392,6 +432,13 @@ export default function Home() {
                     <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z"/>
                   </svg>
                   <span>Mis Alertas</span>
+                </Link>
+                <Link href="/my-cards" className="flex items-center space-x-2 text-gray-600 hover:text-orange-600 transition-colors font-medium">
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
+                    <path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clipRule="evenodd" />
+                  </svg>
+                  <span>Mis Tarjetas</span>
                 </Link>
               <button 
                 onClick={handleProfileClick}
@@ -659,6 +706,7 @@ export default function Home() {
         isOpen={showProfileModal}
         onClose={() => setShowProfileModal(false)}
       />
+
     </DesktopLayout>
   );
 }

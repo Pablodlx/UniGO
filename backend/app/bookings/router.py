@@ -308,6 +308,60 @@ def accept_booking(
         )
         db.add(notification)
         
+        # CREAR PAYMENTINTENT CON CAPTURA MANUAL (nuevo - pagos Stripe)
+        # Esto retiene el pago pero no lo cobra hasta que el viaje se complete
+        payment_intent_created = False
+        try:
+            from app.core.stripe import get_stripe_client, is_stripe_enabled
+            from app.payments.models import Payment, PaymentStatus
+            
+            if is_stripe_enabled():
+                import stripe
+                passenger = db.query(User).filter(User.id == booking.passenger_id).first()
+                
+                if stripe.api_key and passenger and passenger.stripe_customer_id and passenger.stripe_payment_method_id:
+                    # Calculate total amount (price_per_seat * seats) in cents
+                    total_amount_cents = int(ride.price_per_seat * booking.seats * 100)
+                    
+                    # Create PaymentIntent with manual capture
+                    payment_intent = stripe.PaymentIntent.create(
+                        amount=total_amount_cents,
+                        currency="eur",
+                        customer=passenger.stripe_customer_id,
+                        payment_method=passenger.stripe_payment_method_id,
+                        capture_method="manual",  # Don't capture immediately
+                        confirm=True,  # Confirm immediately
+                        off_session=True,  # Customer is not present
+                        metadata={
+                            "booking_id": str(booking.id),
+                            "ride_id": str(ride.id),
+                            "passenger_id": str(passenger.id),
+                            "driver_id": str(ride.driver_id),
+                        }
+                    )
+                    
+                    # Create Payment record
+                    payment = Payment(
+                        booking_id=booking.id,
+                        stripe_customer_id=passenger.stripe_customer_id,
+                        stripe_payment_method_id=passenger.stripe_payment_method_id,
+                        stripe_payment_intent_id=payment_intent.id,
+                        amount_cents=total_amount_cents,
+                        currency="eur",
+                        status=PaymentStatus.requires_capture,
+                    )
+                    db.add(payment)
+                    payment_intent_created = True
+                    log.info(f"[BOOKING ACCEPT] [PAYMENT] Created PaymentIntent {payment_intent.id} for booking {booking.id}")
+                else:
+                    log.warning(f"[BOOKING ACCEPT] [PAYMENT] Stripe not available or passenger has no payment method for booking {booking.id}")
+            else:
+                log.info(f"[BOOKING ACCEPT] [PAYMENT] Stripe not enabled, skipping payment creation")
+        except Exception as e:
+            # Don't fail booking acceptance if payment fails
+            log.error(f"[BOOKING ACCEPT] [PAYMENT] ❌ Error creating PaymentIntent: {e}", exc_info=True)
+            # Continue with booking acceptance even if payment fails
+        
         # OVERBOOKING CONTROLADO: Si se agotaron los asientos, rechazar automáticamente otras reservas PENDING
         rejected_count = 0
         if ride.available_seats <= 0:

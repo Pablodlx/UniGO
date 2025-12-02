@@ -30,6 +30,11 @@ class User(Base):
     home_address_lat = Column(Float, nullable=True)
     home_address_lng = Column(Float, nullable=True)
     avatar_url = Column(String(300), nullable=True)
+    # Stripe fields
+    stripe_customer_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    stripe_payment_method_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # Blocked trips: list of trip IDs that this user has cancelled and should not see again
+    blocked_trip_ids: Mapped[Optional[list[int]]] = mapped_column(ARRAY(Integer), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
@@ -112,6 +117,7 @@ class Booking(Base):
     passenger: Mapped["User"] = relationship("User", back_populates="bookings")
     ratings: Mapped[list["Rating"]] = relationship("Rating", back_populates="booking")
     search_alert: Mapped[Optional["SearchAlert"]] = relationship("SearchAlert", foreign_keys=[search_alert_id])
+    payment: Mapped[Optional["Payment"]] = relationship("Payment", back_populates="booking", uselist=False)
 
 
 class Rating(Base):

@@ -65,3 +65,4 @@ virtualenv==20.34.0
 watchfiles==1.1.0
 websockets==15.0.1
 nest-asyncio
+stripe>=7.0.0
