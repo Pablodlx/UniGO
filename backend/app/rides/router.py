@@ -703,6 +703,33 @@ def book_ride(
         
         print(f"[BOOKING CREATION] ✅ Created pending booking {booking.id} for user {current_user.id} on ride {ride_id}")
         
+        # Send email to driver about new booking request
+        try:
+            from app.core.email import send_new_booking_request_email_sync
+            
+            driver = db.query(User).filter(User.id == ride.driver_id).first()
+            if driver and driver.email:
+                # Format date for email
+                departure_date_str = ride.departure_date.strftime("%d/%m/%Y") if ride.departure_date else "N/A"
+                
+                send_new_booking_request_email_sync(
+                    to_email=driver.email,
+                    driver_name=driver.full_name or driver.email.split("@")[0],
+                    passenger_name=current_user.full_name or current_user.email.split("@")[0],
+                    departure_city=ride.departure_city,
+                    destination_city=ride.destination_city,
+                    departure_date=departure_date_str,
+                    departure_time=ride.departure_time,
+                    seats=seats,
+                )
+                print(f"[BOOKING CREATION] ✅ Email sent to driver {driver.email}")
+            else:
+                print(f"[BOOKING CREATION] ⚠️ Driver email not available, skipping email")
+        except Exception as email_error:
+            # Don't fail booking creation if email fails
+            print(f"[BOOKING CREATION] ⚠️ Error sending email to driver: {email_error}")
+            log.error(f"[BOOKING CREATION] Error sending email: {email_error}", exc_info=True)
+        
         # Return success with pending status
         return {"success": True, "status": "pending", "booking_id": booking.id}
     except Exception as e:

@@ -1635,6 +1635,144 @@ Próximos pasos:
         traceback.print_exc()
 
 
+def send_new_booking_request_email_sync(
+    to_email: str,
+    driver_name: str,
+    passenger_name: str,
+    departure_city: str,
+    destination_city: str,
+    departure_date: str,
+    departure_time: str,
+    seats: int,
+) -> None:
+    """
+    Send email to driver when they receive a new booking request.
+    This is sent synchronously when a passenger creates a booking in pending status.
+    """
+    try:
+        import base64
+        
+        # Load environment variables (same pattern as send_verification_email_sync)
+        from dotenv import load_dotenv
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        env_path = os.path.join(backend_dir, ".env")
+        if os.path.exists(env_path):
+            load_dotenv(env_path, override=True)
+        
+        email_backend = os.getenv("EMAIL_BACKEND", "").strip().lower()
+        mailjet_api_key = os.getenv("MAILJET_API_KEY", "").strip()
+        mailjet_secret_key = os.getenv("MAILJET_SECRET_KEY", "").strip()
+        email_from = os.getenv("EMAIL_FROM", "unigonoreply@gmail.com").strip()
+        email_from_name = os.getenv("EMAIL_FROM_NAME", "UniGO").strip()
+        
+        print(f"[Email] Enviando email de nueva solicitud de reserva a {to_email}", flush=True)
+        log.info(f"[Email] Sending new booking request email to {to_email}")
+        log.info(f"[Email] Config: backend={email_backend}, mailjet_api_key={'present' if mailjet_api_key else 'missing'}")
+        
+        subject = "Nueva solicitud de reserva en UniGO"
+        
+        text_body = f"""Hola {driver_name},
+
+Tienes una nueva solicitud de reserva pendiente de confirmar en uno de tus viajes.
+
+Entra en UniGO para revisarla y aceptarla o rechazarla.
+
+UniGO
+"""
+        
+        html_body = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nueva solicitud de reserva - UniGO</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f3f4f6;">
+    <div style="max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+        <!-- Content -->
+        <div style="padding: 40px;">
+            <p style="margin: 0 0 24px 0; color: #374151; font-size: 16px; line-height: 1.6;">
+                Hola <strong>{driver_name}</strong>,
+            </p>
+            
+            <p style="margin: 0 0 24px 0; color: #374151; font-size: 16px; line-height: 1.6;">
+                Tienes una nueva solicitud de reserva pendiente de confirmar en uno de tus viajes.
+            </p>
+            
+            <p style="margin: 0 0 24px 0; color: #374151; font-size: 16px; line-height: 1.6;">
+                Entra en UniGO para revisarla y aceptarla o rechazarla.
+            </p>
+        </div>
+        
+        <!-- Footer -->
+        <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb;">
+            <p style="margin: 0; color: #6b7280; font-size: 14px;">
+                <strong style="color: #10b981;">UniGO</strong>
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+        
+        # Send via Mailjet
+        if email_backend == "mailjet" and mailjet_api_key and mailjet_secret_key:
+            print(f"[Email] Enviando con Mailjet API...", flush=True)
+            log.info(f"[Email] Sending new booking request email via Mailjet to {to_email}")
+            
+            url = "https://api.mailjet.com/v3.1/send"
+            auth_string = f"{mailjet_api_key}:{mailjet_secret_key}"
+            auth_b64 = base64.b64encode(auth_string.encode('ascii')).decode('ascii')
+            
+            headers = {
+                "Authorization": f"Basic {auth_b64}",
+                "Content-Type": "application/json",
+            }
+            
+            payload = {
+                "Messages": [
+                    {
+                        "From": {
+                            "Email": email_from,
+                            "Name": email_from_name,
+                        },
+                        "To": [
+                            {
+                                "Email": to_email,
+                            }
+                        ],
+                        "Subject": subject,
+                        "TextPart": text_body,
+                        "HTMLPart": html_body,
+                    }
+                ]
+            }
+            
+            print(f"[Email] Haciendo POST a Mailjet...", flush=True)
+            with httpx.Client(timeout=httpx.Timeout(5.0, read=10.0)) as client:
+                response = client.post(url, json=payload, headers=headers)
+                print(f"[Email] Respuesta: Status {response.status_code}", flush=True)
+                response.raise_for_status()
+                
+                # Log response
+                try:
+                    response_data = response.json()
+                    print(f"[Email] Mailjet response: {response_data}", flush=True)
+                    log.info(f"[Email] Mailjet response: {response_data}")
+                except:
+                    pass
+            
+            print(f"[Email] ✅ Email de nueva solicitud enviado exitosamente", flush=True)
+            log.info(f"[Email] ✅ New booking request email sent successfully to {to_email}")
+        else:
+            print(f"[Email] ⚠️ Mailjet not configured: backend={email_backend}, api_key={'present' if mailjet_api_key else 'missing'}", flush=True)
+            log.warning(f"[Email] Mailjet not configured, skipping new booking request email")
+            
+    except Exception as e:
+        log.error(f"[Email] ❌ Error sending new booking request email to {to_email}: {e}", exc_info=True)
+        # Don't raise - email failure shouldn't block booking creation
+
+
 def send_verification_email_sync(email: str, code: str) -> None:
     """
     Synchronous wrapper for sending verification email.
