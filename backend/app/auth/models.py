@@ -253,3 +253,23 @@ class SearchAlert(Base):
     
     # Relationship to User
     user: Mapped["User"] = relationship("User")
+
+
+class AlertDriverRejection(Base):
+    """
+    Tracks which drivers have rejected bookings for specific alerts/trips.
+    This prevents infinite retry loops by excluding rejected drivers from future searches.
+    """
+    __tablename__ = "alert_driver_rejections"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    alert_id: Mapped[int] = mapped_column(ForeignKey("search_alerts.id", ondelete="CASCADE"), nullable=False, index=True)
+    trip_id: Mapped[int] = mapped_column(ForeignKey("rides.id", ondelete="CASCADE"), nullable=False)
+    driver_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    rejected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    
+    # Relationships
+    alert: Mapped["SearchAlert"] = relationship("SearchAlert")
+    trip: Mapped["Ride"] = relationship("Ride")
+    driver: Mapped["User"] = relationship("User")

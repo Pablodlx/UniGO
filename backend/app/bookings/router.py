@@ -571,6 +571,36 @@ def reject_booking(
         db.refresh(system_message)
         db.refresh(notification)
         
+        # Record the rejection to prevent retry loops
+        # If this booking was created by an alert, record that this driver rejected it
+        try:
+            if hasattr(booking, 'search_alert_id') and booking.search_alert_id:
+                from app.auth.models import AlertDriverRejection
+                from datetime import datetime, timezone
+                
+                # Check if rejection already exists
+                existing_rejection = db.query(AlertDriverRejection).filter(
+                    AlertDriverRejection.alert_id == booking.search_alert_id,
+                    AlertDriverRejection.trip_id == ride.id,
+                    AlertDriverRejection.driver_id == ride.driver_id,
+                ).first()
+                
+                if not existing_rejection:
+                    rejection = AlertDriverRejection(
+                        alert_id=booking.search_alert_id,
+                        trip_id=ride.id,
+                        driver_id=ride.driver_id,
+                        rejected_at=datetime.now(timezone.utc),
+                    )
+                    db.add(rejection)
+                    db.commit()
+                    print(f"[BOOKING REJECT] ✅ Recorded rejection: alert {booking.search_alert_id}, trip {ride.id}, driver {ride.driver_id}")
+                else:
+                    print(f"[BOOKING REJECT] Rejection already recorded for alert {booking.search_alert_id}, trip {ride.id}, driver {ride.driver_id}")
+        except Exception as e:
+            print(f"[BOOKING REJECT] ⚠️ Error recording rejection: {e}")
+            # Don't fail the rejection if this fails
+        
         # If this was an automatic booking (from a search alert), 
         # re-trigger search for the passenger's active alerts to find other matching trips
         # IMPORTANTE: Esto NO desactiva la alerta, solo busca nuevos viajes compatibles

@@ -1961,6 +1961,20 @@ def retry_search_for_rejected_auto_booking(db: Session, passenger_id: int, rejec
     excluded_ride_ids = {b.ride_id for b in existing_bookings}
     excluded_ride_ids.add(rejected_ride_id)  # Also exclude the ride that was just rejected
     
+    # Get rejected drivers for each alert to prevent retry loops
+    from app.auth.models import AlertDriverRejection
+    alert_rejected_drivers = {}  # {alert_id: set(driver_ids)}
+    
+    for alert in active_alerts:
+        rejections = db.query(AlertDriverRejection).filter(
+            AlertDriverRejection.alert_id == alert.id
+        ).all()
+        rejected_driver_ids = {r.driver_id for r in rejections}
+        alert_rejected_drivers[alert.id] = rejected_driver_ids
+        
+        if rejected_driver_ids:
+            print(f"[RETRY SEARCH] Alert {alert.id} has {len(rejected_driver_ids)} rejected drivers: {rejected_driver_ids}")
+    
     # Get current date to filter out past trips
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
@@ -2092,6 +2106,16 @@ def retry_search_for_rejected_auto_booking(db: Session, passenger_id: int, rejec
             
             if existing_booking:
                 logger.info(f"[ALERT] Skipping alert {alert.id}: User {alert.user_id} already has a booking for trip {trip.id} (status: {existing_booking.status})")
+                continue
+            
+            # Skip if driver has already rejected this alert
+            if alert.id in alert_rejected_drivers and trip.driver_id in alert_rejected_drivers[alert.id]:
+                logger.info(f"[RETRY SEARCH] Skipping trip {trip.id} - driver {trip.driver_id} already rejected alert {alert.id}")
+                continue
+            
+            # Skip if driver has already rejected this alert (prevent retry loops)
+            if alert.id in alert_rejected_drivers and trip.driver_id in alert_rejected_drivers[alert.id]:
+                logger.info(f"[RETRY SEARCH] Skipping trip {trip.id} - driver {trip.driver_id} already rejected alert {alert.id}")
                 continue
             
             # REGLA 1-3: Verificar si ya existe una reserva automática activa para este día
