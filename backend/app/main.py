@@ -184,5 +184,7 @@ app.include_router(search_alerts_router, prefix="/api")
 app.include_router(users_router, prefix="/api")
 from app.payments.router import router as payments_router
 from app.payments.bank_account_router import router as bank_account_router
+from app.ai.router import router as ai_router
 app.include_router(payments_router, prefix="/api")
 app.include_router(bank_account_router, prefix="/api")
+app.include_router(ai_router, prefix="/api")
