@@ -303,9 +303,15 @@ def get_ride_history(
     from datetime import datetime, timezone, timedelta
     from sqlalchemy import and_
     from app.auth.models import Rating
-    from app.rides.service import get_ride_check_datetime, calculate_arrival_datetime, calculate_arrival_time_string
+    from app.rides.service import get_ride_check_datetime, calculate_arrival_datetime, calculate_arrival_time_string, _get_driver_trip_stats
     
     now = datetime.now(timezone.utc)
+    
+    # Import ratings service for driver ratings
+    try:
+        from app.ratings import service as ratings_service
+    except ImportError:
+        ratings_service = None
     
     # Get all rides where user was driver
     all_driver_rides = db.query(Ride).filter(
@@ -412,6 +418,19 @@ def get_ride_history(
                         "can_rate": can_rate,
                     })
             
+            # Get driver's average rating and completed trips for display
+            driver_average_rating = None
+            driver_completed_trips = 0
+            if ratings_service:
+                try:
+                    driver_average_rating = ratings_service.get_user_average_rating(db, driver.id)
+                except Exception:
+                    driver_average_rating = None
+            try:
+                driver_completed_trips, _ = _get_driver_trip_stats(db, driver.id)
+            except Exception:
+                driver_completed_trips = 0
+            
             # Create ride entry (one per ride, not per booking)
             driver_rides_map[ride.id] = {
                 "id": ride.id,
@@ -419,6 +438,8 @@ def get_ride_history(
                 "driver_name": driver.full_name or driver.email,
                 "driver_university": driver.university,
                 "driver_avatar_url": driver.avatar_url,
+                "driver_average_rating": driver_average_rating,
+                "driver_completed_trips": driver_completed_trips,
                 "departure_city": ride.departure_city,
                 "departure_lat": ride.departure_lat,
                 "departure_lng": ride.departure_lng,
@@ -467,20 +488,23 @@ def get_ride_history(
             is_canceled = booking.status == BookingStatus.canceled
             if check_datetime < now or not ride.is_active or is_rejected or is_canceled:
                 driver = db.query(User).filter(User.id == ride.driver_id).first()
-                # Determine status: ALWAYS prioritize trip status over booking status
-                # Trip status is the source of truth
-                if not ride.is_active:
-                    # Trip was cancelled by driver
-                    status = "cancelled"
-                elif check_datetime < now:
-                    # Trip has passed and is still active -> completed
-                    status = "completed"
-                elif is_rejected:
-                    # Booking was rejected (but trip is still active/upcoming)
+                # Determine status with correct priority:
+                # 1. Rejected booking → "rejected" (highest priority)
+                # 2. Canceled booking → "cancelled" 
+                # 3. Trip cancelled by driver (before it passed) → "cancelled"
+                # 4. Trip completed (passed and active/inactive) → "completed"
+                if is_rejected:
+                    # Booking was rejected by driver → always show as "rejected"
                     status = "rejected"
                 elif is_canceled:
-                    # Booking was cancelled by passenger (but trip might still be active)
+                    # Booking was cancelled by passenger → always show as "cancelled"
                     status = "cancelled"
+                elif not ride.is_active and check_datetime >= now:
+                    # Trip was cancelled by driver before it passed → "cancelled"
+                    status = "cancelled"
+                elif check_datetime < now:
+                    # Trip has passed → "completed" (only if not rejected/cancelled above)
+                    status = "completed"
                 else:
                     # Default to completed for past rides
                     status = "completed"
@@ -523,6 +547,19 @@ def get_ride_history(
                 if not driver:
                     continue  # Skip if driver not found
                 
+                # Get driver's average rating and completed trips for display
+                driver_average_rating = None
+                driver_completed_trips = 0
+                if ratings_service:
+                    try:
+                        driver_average_rating = ratings_service.get_user_average_rating(db, driver.id)
+                    except Exception:
+                        driver_average_rating = None
+                try:
+                    driver_completed_trips, _ = _get_driver_trip_stats(db, driver.id)
+                except Exception:
+                    driver_completed_trips = 0
+                
                 driver_name = driver.full_name or driver.email
                 rated_user_info = {
                     "rated_user_id": ride.driver_id,
@@ -536,6 +573,8 @@ def get_ride_history(
                     "driver_name": driver.full_name or driver.email,
                     "driver_university": driver.university,
                     "driver_avatar_url": driver.avatar_url,
+                    "driver_average_rating": driver_average_rating,
+                    "driver_completed_trips": driver_completed_trips,
                     "departure_city": ride.departure_city,
                     "departure_lat": ride.departure_lat,
                     "departure_lng": ride.departure_lng,

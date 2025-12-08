@@ -57,19 +57,60 @@ except ImportError:
 def _get_driver_trip_stats(db: Session, driver_id: int) -> tuple[int, int]:
     """Helper function to calculate driver's completed trip statistics"""
     from datetime import datetime, timezone
+    from app.auth.models import Booking, BookingStatus
     
     now = datetime.now(timezone.utc)
-    completed_driver_trips = db.query(Ride).filter(
-        Ride.driver_id == driver_id,
-        Ride.is_active == True,
-        Ride.departure_date < now
-    ).count()
     
-    completed_passenger_trips = db.query(Booking).join(Ride).filter(
+    # Get all driver rides
+    all_driver_rides = db.query(Ride).filter(
+        Ride.driver_id == driver_id
+    ).all()
+    
+    completed_driver_trips = 0
+    for ride in all_driver_rides:
+        # Check if ride has passed using arrival time if available, else departure time
+        check_datetime = get_ride_check_datetime(ride)
+        
+        # Only count if ride has passed (completed)
+        if check_datetime < now:
+            # Check if it was cancelled: inactive AND no confirmed bookings = cancelled
+            confirmed_bookings_count = db.query(Booking).filter(
+                Booking.ride_id == ride.id,
+                Booking.status == BookingStatus.confirmed
+            ).count()
+            
+            # If ride is inactive and has no confirmed bookings, it was cancelled (don't count)
+            if not ride.is_active and confirmed_bookings_count == 0:
+                continue  # Skip cancelled rides
+            
+            # Otherwise, it's completed
+            completed_driver_trips += 1
+    
+    # Calculate completed passenger trips
+    all_passenger_bookings = db.query(Booking).filter(
         Booking.passenger_id == driver_id,
-        Booking.status == BookingStatus.confirmed,
-        Ride.departure_date < now
-    ).count()
+        Booking.status == BookingStatus.confirmed
+    ).all()
+    
+    completed_passenger_trips = 0
+    for booking in all_passenger_bookings:
+        ride = db.query(Ride).filter(Ride.id == booking.ride_id).first()
+        if ride:
+            check_datetime = get_ride_check_datetime(ride)
+            # Only count if ride has passed (completed)
+            if check_datetime < now:
+                # Check if ride was cancelled
+                confirmed_bookings_count = db.query(Booking).filter(
+                    Booking.ride_id == ride.id,
+                    Booking.status == BookingStatus.confirmed
+                ).count()
+                
+                # If ride is inactive and has no confirmed bookings, it was cancelled (don't count)
+                if not ride.is_active and confirmed_bookings_count == 0:
+                    continue  # Skip cancelled rides
+                
+                # Otherwise, it's completed
+                completed_passenger_trips += 1
     
     return completed_driver_trips, completed_passenger_trips
 
@@ -614,6 +655,11 @@ def mark_completed_rides(db: Session, user_id: int = None) -> int:
             if departure_datetime < now:
                 ride.is_active = False
                 marked_count += 1
+                
+                # Update all confirmed bookings to remain as confirmed
+                # The ride history logic will show them as completed based on check_datetime < now
+                # No need to change booking status - they stay as "confirmed"
+                # The history display logic handles showing them as "completed"
                 
                 # CAPTURE PAYMENTS for confirmed bookings (NEW: auto-capture when ride completes)
                 try:

@@ -26,23 +26,67 @@ def get_profile(db: Session, user: User) -> ProfileOut:
     average_rating_display = "No hay valoraciones" if average_rating is None else str(average_rating)
     
     # Calculate completed driver trips
-    # Viaje completado como conductor = ride.driver_id == user.id AND ride.is_active == True 
-    # AND departure_date + departure_time < now
+    # Viaje completado como conductor = ride.driver_id == user.id 
+    # AND check_datetime < now (el viaje ya pasó)
+    # AND NO es cancelado (is_active=False sin bookings confirmados = cancelado)
+    from app.rides.service import get_ride_check_datetime
+    
     now = datetime.now(timezone.utc)
-    completed_driver_trips = db.query(Ride).filter(
-        Ride.driver_id == user.id,
-        Ride.is_active == True,
-        Ride.departure_date < now
-    ).count()
+    all_driver_rides = db.query(Ride).filter(
+        Ride.driver_id == user.id
+    ).all()
+    
+    completed_driver_trips = 0
+    for ride in all_driver_rides:
+        # Check if ride has passed using arrival time if available, else departure time
+        check_datetime = get_ride_check_datetime(ride)
+        
+        # Only count if ride has passed (completed)
+        if check_datetime < now:
+            # Check if it was cancelled: inactive AND no confirmed bookings = cancelled
+            confirmed_bookings_count = db.query(Booking).filter(
+                Booking.ride_id == ride.id,
+                Booking.status == BookingStatus.confirmed
+            ).count()
+            
+            # If ride is inactive and has no confirmed bookings, it was cancelled (don't count)
+            if not ride.is_active and confirmed_bookings_count == 0:
+                continue  # Skip cancelled rides
+            
+            # Otherwise, it's completed
+            completed_driver_trips += 1
     
     # Calculate completed passenger trips
     # Viaje completado como pasajero = booking.passenger_id == user.id 
-    # AND booking.status == "confirmed" AND ride.departure_date < now
-    completed_passenger_trips = db.query(Booking).join(Ride).filter(
+    # AND booking.status == "confirmed" 
+    # AND check_datetime < now (el viaje ya pasó)
+    # AND el viaje NO está cancelado
+    from app.rides.service import get_ride_check_datetime
+    
+    all_passenger_bookings = db.query(Booking).filter(
         Booking.passenger_id == user.id,
-        Booking.status == BookingStatus.confirmed,
-        Ride.departure_date < now
-    ).count()
+        Booking.status == BookingStatus.confirmed
+    ).all()
+    
+    completed_passenger_trips = 0
+    for booking in all_passenger_bookings:
+        ride = db.query(Ride).filter(Ride.id == booking.ride_id).first()
+        if ride:
+            check_datetime = get_ride_check_datetime(ride)
+            # Only count if ride has passed (completed)
+            if check_datetime < now:
+                # Check if ride was cancelled
+                confirmed_bookings_count = db.query(Booking).filter(
+                    Booking.ride_id == ride.id,
+                    Booking.status == BookingStatus.confirmed
+                ).count()
+                
+                # If ride is inactive and has no confirmed bookings, it was cancelled (don't count)
+                if not ride.is_active and confirmed_bookings_count == 0:
+                    continue  # Skip cancelled rides
+                
+                # Otherwise, it's completed
+                completed_passenger_trips += 1
     
     # Build home address if available
     home_address = None

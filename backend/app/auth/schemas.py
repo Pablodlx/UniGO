@@ -29,3 +29,7 @@ class UserOut(BaseModel):
 class VerifyEmail(BaseModel):
     email: EmailStr
     code: str = Field(min_length=6, max_length=6)
+
+
+class ResendCodeRequest(BaseModel):
+    email: EmailStr

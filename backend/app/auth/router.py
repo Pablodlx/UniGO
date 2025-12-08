@@ -8,7 +8,7 @@ import threading
 
 from app.auth import service
 from app.auth.models import User
-from app.auth.schemas import Token, UserCreate, UserLogin, UserOut, VerifyEmail
+from app.auth.schemas import Token, UserCreate, UserLogin, UserOut, VerifyEmail, ResendCodeRequest
 from app.core.config import settings
 from app.core.email import send_verification_email_sync, send_verification_email
 from app.db.session import get_db
@@ -23,23 +23,27 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
-@router.post("/register", status_code=204)
+@router.post("/register")
 def register_user(
     data: UserCreate,
     bg: BackgroundTasks,
     db: Session = Depends(get_db),
-) -> Response:
+):
     """
     Crea/actualiza usuario y genera un código de verificación.
     Envía el email en segundo plano (async email service).
     
     FLUJO COMPLETO:
-    1. Se crea el usuario en la base de datos
+    1. Se crea el usuario en la base de datos (o se actualiza si existe y no está verificado)
     2. Se genera un código de verificación de 6 dígitos
     3. Se envía el email automáticamente usando Mailjet (o el backend configurado)
+    
+    Si el email ya existe pero no está verificado, reenvía el código y devuelve status "pending_verification"
     """
     # FORZAR LOGS INMEDIATAMENTE
     import sys
+    from fastapi.responses import JSONResponse
+    
     print("=" * 70, flush=True)
     print(f"[Register] ===== INICIANDO REGISTRO PARA {data.email} =====", flush=True)
     print("=" * 70, flush=True)
@@ -57,11 +61,16 @@ def register_user(
         log.info(f"[Register] Paso 1: Llamando a service.register() para {data.email}")
         sys.stdout.flush()
         
-        code = service.register(db, data)  # Devuelve el string del código de 6 dígitos
+        code, registration_status = service.register(db, data)  # Devuelve (código, status)
         
-        print(f"[Register] Paso 2: Usuario registrado exitosamente", flush=True)
+        if registration_status == "pending_verification":
+            print(f"[Register] Paso 2: Usuario existente no verificado - reenviando código", flush=True)
+            log.info(f"[Register] Paso 2: Usuario existente no verificado - reenviando código")
+        else:
+            print(f"[Register] Paso 2: Usuario registrado exitosamente", flush=True)
+            log.info(f"[Register] Paso 2: Usuario registrado exitosamente")
+        
         print(f"[Register] Paso 3: Código generado: {code}", flush=True)
-        log.info(f"[Register] Paso 2: Usuario registrado exitosamente")
         log.info(f"[Register] Paso 3: Código de verificación generado: {code} para {data.email}")
         sys.stdout.flush()
         
@@ -117,15 +126,30 @@ def register_user(
             log.info(f"[Register] Paso 5: Email ya enviado, NO usando BackgroundTasks")
         sys.stdout.flush()
         
-        print(f"[Register] Paso 6: Enviando respuesta HTTP 204", flush=True)
-        log.info(f"[Register] Paso 6: Registro completado. Enviando respuesta HTTP 204")
-        print("=" * 70, flush=True)
-        log.info("=" * 70)
-        log.info(f"[Register] ===== REGISTRO COMPLETADO PARA {data.email} =====")
-        log.info("=" * 70)
-        sys.stdout.flush()
-        
-        return Response(status_code=204)
+        # Si es pending_verification, devolver JSON con status
+        if registration_status == "pending_verification":
+            print(f"[Register] Paso 6: Enviando respuesta JSON con status pending_verification", flush=True)
+            log.info(f"[Register] Paso 6: Registro completado. Enviando respuesta JSON con status pending_verification")
+            print("=" * 70, flush=True)
+            log.info("=" * 70)
+            log.info(f"[Register] ===== REGISTRO COMPLETADO PARA {data.email} (PENDING VERIFICATION) =====")
+            log.info("=" * 70)
+            sys.stdout.flush()
+            
+            return JSONResponse(
+                status_code=200,
+                content={"status": "pending_verification"}
+            )
+        else:
+            print(f"[Register] Paso 6: Enviando respuesta HTTP 204", flush=True)
+            log.info(f"[Register] Paso 6: Registro completado. Enviando respuesta HTTP 204")
+            print("=" * 70, flush=True)
+            log.info("=" * 70)
+            log.info(f"[Register] ===== REGISTRO COMPLETADO PARA {data.email} =====")
+            log.info("=" * 70)
+            sys.stdout.flush()
+            
+            return Response(status_code=204)
         
     except HTTPException:
         # Re-raise HTTP exceptions (validation errors, etc.)
@@ -142,6 +166,46 @@ def register_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error interno durante el registro: {str(e)}"
         )
+
+
+@router.post("/resend-code")
+def resend_verification_code(
+    data: ResendCodeRequest,
+    bg: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """
+    Reenvía el código de verificación a un usuario que aún no ha verificado su email.
+    Solo funciona si el usuario existe y no está verificado.
+    Solo requiere email, NO requiere code.
+    """
+    user = db.query(User).filter(User.email == data.email).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se encontró una cuenta con este correo electrónico",
+        )
+    
+    if user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Esta cuenta ya está verificada",
+        )
+    
+    # Generar nuevo código usando la función del servicio
+    code = service._issue_email_code(db, data.email)
+    
+    # Enviar email
+    try:
+        send_verification_email_sync(data.email, code)
+        log.info(f"[Resend Code] Email enviado exitosamente a {data.email}")
+    except Exception as e:
+        log.error(f"[Resend Code] Error al enviar email: {e}", exc_info=True)
+        # No fallar si el email falla, pero intentar en background
+        bg.add_task(send_verification_email_sync, email=data.email, code=code)
+    
+    return {"message": "Código de verificación reenviado"}
 
 
 @router.post("/verify", response_model=Token)

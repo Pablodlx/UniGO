@@ -194,10 +194,12 @@ def _issue_email_code(db: Session, email: str, purpose: str = "verify_email") ->
     return code
 
 
-def register(db: Session, data: UserCreate) -> str:
+def register(db: Session, data: UserCreate) -> tuple[str, str]:
     """
     Crea el usuario (si no existe) y genera un código de verificación.
-    DEVUELVE SIEMPRE el string del código para que el router lo envíe por email.
+    DEVUELVE una tupla (código, status) donde:
+    - código: string del código para que el router lo envíe por email
+    - status: "new" (nuevo usuario) o "pending_verification" (usuario existente no verificado)
     """
     domain = _extract_domain(data.email)
     if not _is_allowed_domain(domain):
@@ -206,12 +208,25 @@ def register(db: Session, data: UserCreate) -> str:
             detail=f"El dominio de correo '{domain}' no está permitido",
         )
 
-    if db.query(User).filter(User.email == data.email).first():
-        # Mensaje claro cuando el correo ya existe
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Ya existe una cuenta registrada con el correo {data.email}",
-        )
+    existing_user = db.query(User).filter(User.email == data.email).first()
+    if existing_user:
+        # Si el usuario existe pero NO está verificado, reenviar código
+        if not existing_user.is_verified:
+            # Actualizar password por si cambió
+            existing_user.password_hash = hash_password(data.password)
+            db.commit()
+            db.refresh(existing_user)
+            
+            # Generar y guardar nuevo código
+            code = _issue_email_code(db, data.email)
+            print(f"[UniGo] Código de verificación reenviado para {data.email}: {code}")
+            return code, "pending_verification"
+        else:
+            # Usuario ya existe y está verificado
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Ya existe una cuenta registrada con el correo {data.email}",
+            )
 
     try:
         # Detect university from email domain
@@ -239,7 +254,7 @@ def register(db: Session, data: UserCreate) -> str:
         code = _issue_email_code(db, data.email)
         # Log de ayuda en dev
         print(f"[UniGo] Código de verificación para {data.email}: {code}")
-        return code
+        return code, "new"
 
     except SQLAlchemyError as err:
         db.rollback()

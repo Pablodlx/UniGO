@@ -133,11 +133,36 @@ export async function login(email: string, password: string): Promise<string> {
 }
 
 // --- Auth: register ---
-export async function register(email: string, password: string): Promise<void> {
-  await fetchJson<void>(`${BASE}/auth/register`, {
+export async function register(email: string, password: string): Promise<{ status?: string } | void> {
+  const response = await fetch(`${BASE}/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
+  });
+  
+  // Si es 200, puede ser pending_verification
+  if (response.status === 200) {
+    const data = await response.json();
+    return data; // { status: "pending_verification" }
+  }
+  
+  // Si es 204, registro exitoso (nuevo usuario)
+  if (response.status === 204) {
+    return;
+  }
+  
+  // Si hay error, lanzar excepción
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(errorText || `Error en registro: ${response.status}`);
+  }
+}
+
+export async function resendVerificationCode(email: string): Promise<void> {
+  await fetchJson<void>(`${BASE}/auth/resend-code`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
   });
 }
 

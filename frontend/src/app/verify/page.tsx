@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import DesktopLayout from "@/components/DesktopLayout";
 import Link from "next/link";
-import { verifyEmail } from "@/lib/api";
+import { verifyEmail, resendVerificationCode } from "@/lib/api";
 
 export default function VerifyPage() {
   const searchParams = useSearchParams();
@@ -14,6 +14,8 @@ export default function VerifyPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [resendMessage, setResendMessage] = useState("");
+  const [resending, setResending] = useState(false);
 
   // Auto-focus first input
   useEffect(() => {
@@ -271,12 +273,40 @@ export default function VerifyPage() {
                     <p className="text-gray-600 text-sm">
                       ¿No recibiste el código?{" "}
                       <button
-                        onClick={() => router.push("/register")}
-                        className="text-orange-600 font-semibold hover:text-orange-700 transition-colors underline"
+                        onClick={async () => {
+                          if (!email) return;
+                          setResending(true);
+                          setResendMessage("");
+                          setError("");
+                          try {
+                            await resendVerificationCode(email);
+                            setResendMessage("Te hemos enviado un nuevo código de verificación");
+                            // Limpiar código actual
+                            setCode("");
+                            // Focus first input
+                            setTimeout(() => {
+                              const firstInput = document.getElementById("code-0");
+                              if (firstInput) {
+                                (firstInput as HTMLInputElement).focus();
+                              }
+                            }, 100);
+                          } catch (err: any) {
+                            setError(err?.message || "Error al reenviar el código. Por favor, inténtalo de nuevo.");
+                          } finally {
+                            setResending(false);
+                          }
+                        }}
+                        disabled={resending || !email}
+                        className="text-orange-600 font-semibold hover:text-orange-700 transition-colors underline disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        Regístrate de nuevo
+                        {resending ? "Enviando..." : "Regístrate de nuevo"}
                       </button>
                     </p>
+                    {resendMessage && (
+                      <p className="text-green-600 text-sm mt-2 font-medium">
+                        {resendMessage}
+                      </p>
+                    )}
                   </div>
                 </>
               )}

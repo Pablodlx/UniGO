@@ -19,8 +19,10 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
-      await register(email, password);
-      // Redirige a la pantalla de verificación
+      const result = await register(email, password);
+      // Si es pending_verification, también redirige a verificación (código reenviado)
+      // Si es undefined (204), es un nuevo usuario
+      // En ambos casos, redirigir a verificación
       router.push("/verify?email=" + encodeURIComponent(email));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al registrarse");

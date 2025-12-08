@@ -50,14 +50,19 @@ export default function ReviewsModal({ isOpen, userId, onClose }: ReviewsModalPr
   if (!isOpen) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/20 backdrop-blur-md backdrop-saturate-200"
-      onClick={onClose}
-    >
+    <>
+      {/* Overlay fullscreen blur */}
       <div
-        className="relative bg-white rounded-xl shadow-2xl max-w-2xl w-full border border-gray-200 transform transition-all max-h-[90vh] overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
+        className="fixed inset-0 w-screen h-screen bg-white/20 backdrop-blur-xl backdrop-saturate-150 z-[999] transition-opacity duration-300"
+        onClick={onClose}
+      ></div>
+
+      {/* Modal content */}
+      <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 pointer-events-none">
+        <div
+          className="relative bg-white rounded-xl shadow-2xl max-w-2xl w-full border border-gray-200 transform transition-all max-h-[90vh] overflow-hidden flex flex-col pointer-events-auto"
+          onClick={(e) => e.stopPropagation()}
+        >
         {/* Header */}
         <div className="bg-gradient-to-r from-green-50 to-green-100 border-b border-green-200 rounded-t-xl px-8 py-6 flex-shrink-0">
           <div className="flex items-center justify-between">
@@ -192,8 +197,9 @@ export default function ReviewsModal({ isOpen, userId, onClose }: ReviewsModalPr
             Cerrar
           </button>
         </div>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
