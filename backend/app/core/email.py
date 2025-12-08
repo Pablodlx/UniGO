@@ -609,7 +609,7 @@ Si no has solicitado este código, puedes ignorar este correo.
     def _get_password_reset_email_html(self, token: str, reset_url: Optional[str] = None) -> str:
         """Generate HTML template for password reset email."""
         if not reset_url:
-            frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:3001")
+            frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173")
             reset_url = f"{frontend_url}/reset-password?token={token}"
         
         return f"""
@@ -2008,24 +2008,17 @@ Si no has solicitado este código, puedes ignorar este correo.
             log.info(f"[Email] Código: {code}")
             log.info(f"[Email] Status: {response.status_code}")
             log.info("=" * 70)
-            
         else:
-            # Fallback: usar el servicio async
-            print(f"[Email] Usando servicio async como fallback...", flush=True)
-            log.info(f"[Email] Usando servicio async como fallback")
-            result = asyncio.run(send_verification_email(email, code))
-            if not result:
-                raise Exception("El servicio async retornó False")
-            
+            log.warning(f"[Email] Email backend '{email_backend}' not configured or missing credentials")
     except Exception as e:
         print("=" * 70, flush=True)
-        print(f"[Email] ❌ EXCEPCIÓN AL ENVIAR EMAIL", flush=True)
+        print(f"[Email] ❌ EXCEPCIÓN AL ENVIAR EMAIL DE VERIFICACIÓN", flush=True)
         print(f"[Email] Email: {email}", flush=True)
         print(f"[Email] Código: {code}", flush=True)
         print(f"[Email] Error: {str(e)}", flush=True)
         print("=" * 70, flush=True)
         log.error("=" * 70)
-        log.error(f"[Email] ❌ EXCEPCIÓN AL ENVIAR EMAIL")
+        log.error(f"[Email] ❌ EXCEPCIÓN AL ENVIAR EMAIL DE VERIFICACIÓN")
         log.error(f"[Email] Email: {email}")
         log.error(f"[Email] Código: {code}")
         log.error(f"[Email] Error: {str(e)}")
@@ -2033,3 +2026,156 @@ Si no has solicitado este código, puedes ignorar este correo.
         log.error(f"[Email] Traceback completo:", exc_info=True)
         import traceback
         traceback.print_exc()
+
+
+def send_password_reset_email_sync(email: str, reset_url: str) -> None:
+    """
+    Synchronous wrapper for sending password reset email.
+    Usa el mismo patrón que send_verification_email_sync.
+    """
+    import threading
+    import base64
+    thread_name = threading.current_thread().name
+    
+    # FORZAR LOGS INMEDIATOS
+    print("=" * 70, flush=True)
+    print(f"[Email] ===== INICIANDO ENVÍO DE EMAIL DE RECUPERACIÓN DE CONTRASEÑA =====", flush=True)
+    print(f"[Email] Thread: '{thread_name}'", flush=True)
+    print(f"[Email] Email: {email}", flush=True)
+    print("=" * 70, flush=True)
+    
+    log.info("=" * 70)
+    log.info(f"[Email] ===== INICIANDO ENVÍO DE EMAIL DE RECUPERACIÓN DE CONTRASEÑA =====")
+    log.info(f"[Email] Thread: '{thread_name}'")
+    log.info(f"[Email] Email: {email}")
+    log.info("=" * 70)
+    
+    try:
+        # Cargar configuración directamente
+        from dotenv import load_dotenv
+        import os as os_module
+        backend_dir = os_module.path.dirname(os_module.path.dirname(os_module.path.dirname(os_module.path.abspath(__file__))))
+        env_path = os_module.path.join(backend_dir, ".env")
+        if os_module.path.exists(env_path):
+            load_dotenv(env_path, override=True)
+        
+        email_backend = os_module.getenv("EMAIL_BACKEND", "").lower().strip()
+        
+        if email_backend == "mailjet":
+            # Mailjet API
+            api_key = os_module.getenv("MAILJET_API_KEY", "").strip()
+            api_secret = os_module.getenv("MAILJET_SECRET_KEY", "").strip()
+            email_from = os_module.getenv("EMAIL_FROM", "noreply@unigo.app")
+            email_from_name = os_module.getenv("EMAIL_FROM_NAME", "UniGO")
+            
+            print(f"[Email] Mailjet config check:", flush=True)
+            print(f"  - API Key present: {'✅' if api_key else '❌'}", flush=True)
+            print(f"  - Secret Key present: {'✅' if api_secret else '❌'}", flush=True)
+            log.info(f"[Email] Mailjet config: api_key={'present' if api_key else 'missing'}, secret_key={'present' if api_secret else 'missing'}")
+            
+            if not api_key or not api_secret:
+                log.error("[Email] Mailjet credentials not found")
+                print("[Email] ❌ Mailjet credentials not found", flush=True)
+                return
+            
+            url = "https://api.mailjet.com/v3.1/send"
+            auth_string = f"{api_key}:{api_secret}"
+            auth_bytes = auth_string.encode("utf-8")
+            auth_b64 = base64.b64encode(auth_bytes).decode("utf-8")
+            headers = {
+                "Authorization": f"Basic {auth_b64}",
+                "Content-Type": "application/json",
+            }
+            
+            # HTML del email
+            html_body = f"""
+            <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #f97316;">Recuperación de contraseña</h2>
+                    <p>Has solicitado restablecer tu contraseña.</p>
+                    <p>Pulsa este enlace para crear una nueva contraseña:</p>
+                    <p style="margin: 20px 0;">
+                        <a href="{reset_url}" style="background-color: #f97316; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block;">
+                            Restablecer contraseña
+                        </a>
+                    </p>
+                    <p style="margin-top: 10px; font-size: 14px; color: #666;">
+                        O copia y pega este enlace en tu navegador:<br>
+                        <span style="word-break: break-all; color: #0066cc;">{reset_url}</span>
+                    </p>
+                    <p>Si no fuiste tú, ignora este mensaje.</p>
+                    <p style="margin-top: 30px; color: #666; font-size: 12px;">UniGO</p>
+                </div>
+            </body>
+            </html>
+            """
+            
+            text_body = f"""Recuperación de contraseña
+
+Has solicitado restablecer tu contraseña.
+
+Pulsa este enlace para crear una nueva contraseña:
+{reset_url}
+
+Si no fuiste tú, ignora este mensaje.
+
+UniGO"""
+            
+            payload = {
+                "Messages": [
+                    {
+                        "From": {
+                            "Email": email_from,
+                            "Name": email_from_name,
+                        },
+                        "To": [
+                            {
+                                "Email": email,
+                            }
+                        ],
+                        "Subject": "Recuperación de contraseña",
+                        "TextPart": text_body,
+                        "HTMLPart": html_body,
+                    }
+                ]
+            }
+            
+            # Enviar con httpx síncrono
+            import httpx
+            with httpx.Client(timeout=httpx.Timeout(5.0, read=10.0)) as client:
+                print(f"[Email] Enviando a Mailjet API...", flush=True)
+                log.info(f"[Email] Enviando a Mailjet API...")
+                response = client.post(url, json=payload, headers=headers)
+                print(f"[Email] Respuesta recibida: Status {response.status_code}", flush=True)
+                log.info(f"[Email] Respuesta recibida: Status {response.status_code}")
+                response.raise_for_status()
+                
+                if response.status_code == 200:
+                    try:
+                        result = response.json()
+                        if result.get("Messages"):
+                            msg = result["Messages"][0]
+                            if msg.get("Status") == "success":
+                                print(f"[Email] ✅ Mailjet aceptó el email inmediatamente", flush=True)
+                                log.info(f"[Email] ✅ Mailjet aceptó el email inmediatamente")
+                    except:
+                        pass
+            
+            print("=" * 70, flush=True)
+            print(f"[Email] ✅ EMAIL DE RECUPERACIÓN ENVIADO EXITOSAMENTE", flush=True)
+            print(f"[Email] Email: {email}", flush=True)
+            print("=" * 70, flush=True)
+            
+            log.info("=" * 70)
+            log.info(f"[Email] ✅ EMAIL DE RECUPERACIÓN ENVIADO EXITOSAMENTE")
+            log.info(f"[Email] Email: {email}")
+            log.info("=" * 70)
+        else:
+            log.warning(f"[Email] Email backend '{email_backend}' not configured for password reset")
+    except Exception as e:
+        print("=" * 70, flush=True)
+        print(f"[Email] ❌ ERROR al enviar email de recuperación", flush=True)
+        print(f"[Email] Error: {str(e)}", flush=True)
+        print("=" * 70, flush=True)
+        log.error(f"[Email] Error enviando email de recuperación a {email}: {e}", exc_info=True)

@@ -5,12 +5,14 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 import logging
 import threading
+import os
+from datetime import UTC, datetime
 
 from app.auth import service
-from app.auth.models import User
-from app.auth.schemas import Token, UserCreate, UserLogin, UserOut, VerifyEmail, ResendCodeRequest
+from app.auth.models import User, PasswordResetToken
+from app.auth.schemas import Token, UserCreate, UserLogin, UserOut, VerifyEmail, ResendCodeRequest, ForgotPasswordRequest, ResetPasswordRequest
 from app.core.config import settings
-from app.core.email import send_verification_email_sync, send_verification_email
+from app.core.email import send_verification_email_sync, send_verification_email, send_password_reset_email_sync
 from app.db.session import get_db
 
 # Configure logger
@@ -273,3 +275,122 @@ def verify_user_manually_endpoint(
     
     service.verify_user_manually(db, email)
     return Response(status_code=204)
+
+
+@router.post("/forgot-password")
+def forgot_password(
+    data: ForgotPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Solicita recuperación de contraseña. Genera token y envía email.
+    Siempre devuelve success para evitar enumeración de emails.
+    """
+    import uuid
+    from datetime import timedelta
+    
+    user = db.query(User).filter(User.email == data.email).first()
+    
+    # Siempre devolver success para evitar enumeración
+    if not user:
+        return {"message": "Si tu email existe, te enviamos un enlace de recuperación"}
+    
+    # Generar token único
+    token = str(uuid.uuid4())
+    expires_at = datetime.now(UTC) + timedelta(minutes=30)
+    
+    # Crear registro de token
+    reset_token = PasswordResetToken(
+        user_id=user.id,
+        token=token,
+        expires_at=expires_at,
+        used=False
+    )
+    db.add(reset_token)
+    db.commit()
+    
+    # Generar URL de reset
+    frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173")
+    reset_url = f"{frontend_url}/reset-password?token={token}"
+    log.info(f"[Forgot Password] Generando URL de reset: {reset_url}")
+    
+    # Enviar email
+    try:
+        send_password_reset_email_sync(data.email, reset_url)
+        log.info(f"[Forgot Password] Email enviado exitosamente a {data.email}")
+    except Exception as e:
+        log.error(f"[Forgot Password] Error al enviar email: {e}", exc_info=True)
+        # No fallar si el email falla
+    
+    return {"message": "Si tu email existe, te enviamos un enlace de recuperación"}
+
+
+@router.get("/reset-password/validate")
+def validate_reset_token(
+    token: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Valida si un token de recuperación es válido.
+    """
+    from datetime import UTC, datetime
+    
+    if not token:
+        return {"valid": False, "message": "Token no proporcionado"}
+    
+    reset_token = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token == token,
+        PasswordResetToken.used == False,
+        PasswordResetToken.expires_at > datetime.now(UTC)
+    ).first()
+    
+    if not reset_token:
+        log.warning(f"[Validate Token] Token inválido o expirado: {token[:10]}...")
+        return {"valid": False, "message": "Token inválido o expirado"}
+    
+    log.info(f"[Validate Token] Token válido para user_id: {reset_token.user_id}")
+    return {"valid": True, "message": "Token válido"}
+
+
+@router.post("/reset-password")
+def reset_password(
+    data: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Restablece la contraseña usando un token válido.
+    """
+    from datetime import UTC, datetime
+    from app.core.security import hash_password
+    
+    # Buscar token válido
+    reset_token = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token == data.token,
+        PasswordResetToken.used == False,
+        PasswordResetToken.expires_at > datetime.now(UTC)
+    ).first()
+    
+    if not reset_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token inválido o expirado"
+        )
+    
+    # Actualizar contraseña del usuario
+    user = db.query(User).filter(User.id == reset_token.user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario no encontrado"
+        )
+    
+    user.password_hash = hash_password(data.new_password)
+    
+    # Marcar token como usado
+    reset_token.used = True
+    
+    db.commit()
+    
+    log.info(f"[Reset Password] Contraseña restablecida para usuario {user.email}")
+    
+    return {"message": "Contraseña restablecida exitosamente"}

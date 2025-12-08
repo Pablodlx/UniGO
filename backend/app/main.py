@@ -24,7 +24,7 @@ from app.search_alerts.router import router as search_alerts_router
 from app.users.router import router as users_router
 
 # Import all models to ensure they're registered
-from app.auth.models import User, Ride, Booking, EmailCode, Rating, FavoriteRide, Message, TripGroupMessage, Notification, SearchAlert
+from app.auth.models import User, Ride, Booking, EmailCode, Rating, FavoriteRide, Message, TripGroupMessage, Notification, SearchAlert, PasswordResetToken
 from app.payments.models import Payment  # Import Payment model
 from app.db.session import Base, engine
 

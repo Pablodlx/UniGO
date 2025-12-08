@@ -166,6 +166,29 @@ export async function resendVerificationCode(email: string): Promise<void> {
   });
 }
 
+// --- Password Reset ---
+export async function forgotPassword(email: string): Promise<{ message: string }> {
+  return fetchJson<{ message: string }>(`${BASE}/auth/forgot-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function validateResetToken(token: string): Promise<{ valid: boolean; message: string }> {
+  return fetchJson<{ valid: boolean; message: string }>(`${BASE}/auth/reset-password/validate?token=${encodeURIComponent(token)}`, {
+    method: "GET",
+  });
+}
+
+export async function resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
+  return fetchJson<{ message: string }>(`${BASE}/auth/reset-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, new_password: newPassword }),
+  });
+}
+
 // --- Auth: verify email ---
 export async function verifyEmail(email: string, code: string): Promise<string> {
   const data = await fetchJson<LoginResponse>(`${BASE}/auth/verify`, {

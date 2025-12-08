@@ -1,9 +1,11 @@
 import enum
-from datetime import UTC, datetime
+import uuid
+from datetime import UTC, datetime, timedelta
 
 from typing import Optional
 from sqlalchemy import Boolean, Column, DateTime, Enum, Integer, String, Text, Float, ForeignKey, UniqueConstraint, ARRAY, Time, Date
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import UUID
 
 from app.db.session import Base
 
@@ -273,3 +275,19 @@ class AlertDriverRejection(Base):
     alert: Mapped["SearchAlert"] = relationship("SearchAlert")
     trip: Mapped["Ride"] = relationship("Ride")
     driver: Mapped["User"] = relationship("User")
+
+
+class PasswordResetToken(Base):
+    """Token para recuperación de contraseña"""
+    __tablename__ = "password_reset_tokens"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    
+    # Relationships
+    user: Mapped["User"] = relationship("User")
