@@ -1773,6 +1773,274 @@ UniGO
         # Don't raise - email failure shouldn't block booking creation
 
 
+def send_booking_rejected_email_sync(
+    to_email: str,
+    passenger_name: str,
+    driver_name: str,
+    departure_city: str,
+    destination_city: str,
+    departure_date: str,
+    departure_time: str,
+    trip_id: int,
+) -> None:
+    """
+    Send email to passenger when their booking is rejected by the driver.
+    This is sent synchronously when a driver rejects a booking.
+    Uses the same pattern as send_trip_confirmed_email_sync.
+    """
+    import threading
+    import base64
+    import httpx
+    thread_name = threading.current_thread().name
+    
+    # FORZAR LOGS INMEDIATOS
+    print("=" * 70, flush=True)
+    print(f"[Email] ===== INICIANDO ENVÍO DE EMAIL DE RESERVA RECHAZADA =====", flush=True)
+    print(f"[Email] Thread: '{thread_name}'", flush=True)
+    print(f"[Email] Email: {to_email}", flush=True)
+    print(f"[Email] Trip ID: {trip_id}", flush=True)
+    print("=" * 70, flush=True)
+    
+    log.info("=" * 70)
+    log.info(f"[Email] ===== INICIANDO ENVÍO DE EMAIL DE RESERVA RECHAZADA =====")
+    log.info(f"[Email] Thread: '{thread_name}'")
+    log.info(f"[Email] Email: {to_email}")
+    log.info(f"[Email] Trip ID: {trip_id}")
+    log.info("=" * 70)
+    
+    try:
+        # Cargar configuración directamente (igual que send_verification_email_sync)
+        from dotenv import load_dotenv
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        env_path = os.path.join(backend_dir, ".env")
+        if os.path.exists(env_path):
+            load_dotenv(env_path, override=True)
+        
+        email_backend = os.getenv("EMAIL_BACKEND", "").lower().strip()
+        mailjet_api_key = os.getenv("MAILJET_API_KEY", "").strip()
+        mailjet_secret_key = os.getenv("MAILJET_SECRET_KEY", "").strip()
+        email_from = os.getenv("EMAIL_FROM", "").strip()
+        email_from_name = os.getenv("EMAIL_FROM_NAME", "UniGO")
+        
+        print(f"[Email] Configuración:", flush=True)
+        print(f"  - EMAIL_BACKEND: {email_backend}", flush=True)
+        print(f"  - MAILJET_API_KEY: {'✅' if mailjet_api_key else '❌'}", flush=True)
+        print(f"  - MAILJET_SECRET_KEY: {'✅' if mailjet_secret_key else '❌'}", flush=True)
+        print(f"  - EMAIL_FROM: {email_from}", flush=True)
+        
+        log.info(f"[Email] Configuración: backend={email_backend}, from={email_from}")
+        
+        # Si es Mailjet, enviar directamente SIN asyncio
+        if email_backend == "mailjet" and mailjet_api_key and mailjet_secret_key:
+            print(f"[Email] Enviando con Mailjet API (síncrono)...", flush=True)
+            log.info(f"[Email] Enviando con Mailjet API (síncrono)")
+            
+            frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173")
+            
+            subject = "UniGO – Tu reserva ha sido rechazada"
+            
+            html_body = f"""
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reserva rechazada - UniGO</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }}
+        .container {{
+            background-color: #ffffff;
+            border-radius: 8px;
+            padding: 40px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        .header {{
+            text-align: center;
+            margin-bottom: 30px;
+        }}
+        .logo {{
+            font-size: 32px;
+            font-weight: bold;
+            color: #f97316;
+            margin-bottom: 10px;
+        }}
+        .rejected-badge {{
+            background-color: #ef4444;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+            display: inline-block;
+            margin-bottom: 20px;
+        }}
+        .trip-details {{
+            background-color: #f9fafb;
+            border-radius: 8px;
+            padding: 24px;
+            margin: 24px 0;
+        }}
+        .detail-row {{
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }}
+        .detail-row:last-child {{
+            border-bottom: none;
+        }}
+        .detail-label {{
+            font-weight: 600;
+            color: #6b7280;
+        }}
+        .detail-value {{
+            color: #111827;
+            text-align: right;
+        }}
+        .footer {{
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            text-align: center;
+            color: #999;
+            font-size: 12px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">🎓 UniGO</div>
+            <div class="rejected-badge">❌ Reserva Rechazada</div>
+            <h1 style="color: #333; margin: 20px 0 10px 0;">Tu reserva ha sido rechazada</h1>
+        </div>
+        
+        <p>Hola <strong>{passenger_name}</strong>,</p>
+        
+        <p>El conductor <strong>{driver_name}</strong> ha rechazado tu solicitud para el siguiente viaje:</p>
+        
+        <div class="trip-details">
+            <div class="detail-row">
+                <span class="detail-label">📍 Origen:</span>
+                <span class="detail-value"><strong>{departure_city}</strong></span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">🎯 Destino:</span>
+                <span class="detail-value"><strong>{destination_city}</strong></span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">📅 Fecha:</span>
+                <span class="detail-value">{departure_date}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">🕐 Hora:</span>
+                <span class="detail-value">{departure_time}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">👤 Conductor:</span>
+                <span class="detail-value">{driver_name}</span>
+            </div>
+        </div>
+        
+        <p style="margin-top: 24px;">
+            Puedes buscar otro viaje en UniGO.
+        </p>
+        
+        <div class="footer">
+            <p>© 2025 UniGO - Carpooling universitario</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+            
+            text_body = f"""UniGO – Tu reserva ha sido rechazada
+
+Hola {passenger_name},
+
+El conductor {driver_name} ha rechazado tu solicitud para el siguiente viaje:
+
+📍 Origen: {departure_city}
+🎯 Destino: {destination_city}
+📅 Fecha: {departure_date}
+🕐 Hora: {departure_time}
+
+Puedes buscar otro viaje en UniGO.
+
+© 2025 UniGO - Carpooling universitario
+"""
+            
+            url = "https://api.mailjet.com/v3.1/send"
+            auth_string = f"{mailjet_api_key}:{mailjet_secret_key}"
+            auth_b64 = base64.b64encode(auth_string.encode('ascii')).decode('ascii')
+            
+            headers = {
+                "Authorization": f"Basic {auth_b64}",
+                "Content-Type": "application/json",
+            }
+            
+            payload = {
+                "Messages": [
+                    {
+                        "From": {
+                            "Email": email_from,
+                            "Name": email_from_name,
+                        },
+                        "To": [
+                            {
+                                "Email": to_email,
+                            }
+                        ],
+                        "Subject": subject,
+                        "TextPart": text_body,
+                        "HTMLPart": html_body,
+                    }
+                ]
+            }
+            
+            with httpx.Client(timeout=httpx.Timeout(5.0, read=10.0)) as client:
+                print(f"[Email] Enviando a Mailjet API...", flush=True)
+                log.info(f"[Email] Enviando a Mailjet API...")
+                response = client.post(url, json=payload, headers=headers)
+                print(f"[Email] Respuesta recibida: Status {response.status_code}", flush=True)
+                log.info(f"[Email] Respuesta recibida: Status {response.status_code}")
+                response.raise_for_status()
+                
+                # Log de respuesta exitosa
+                try:
+                    response_data = response.json()
+                    print(f"[Email] Mailjet response: {response_data}", flush=True)
+                    log.info(f"[Email] Mailjet response: {response_data}")
+                except:
+                    pass
+            
+            print(f"[Email] ✅ Email enviado exitosamente (Status: {response.status_code})", flush=True)
+            log.info(f"[Email] ✅ Booking rejected email sent successfully to {to_email} via Mailjet (Status: {response.status_code})")
+        else:
+            print(f"[Email] ⚠️ EMAIL_BACKEND no es 'mailjet' o faltan credenciales", flush=True)
+            log.warning(f"[Email] ⚠️ EMAIL_BACKEND={email_backend}, no se puede enviar email")
+    except Exception as e:
+        print("=" * 70, flush=True)
+        print(f"[Email] ❌❌❌ ERROR AL ENVIAR EMAIL DE RESERVA RECHAZADA ❌❌❌", flush=True)
+        print(f"[Email] Error: {str(e)}", flush=True)
+        print("=" * 70, flush=True)
+        log.error("=" * 70)
+        log.error(f"[Email] ❌❌❌ ERROR CRÍTICO al enviar email de reserva rechazada ❌❌❌")
+        log.error(f"[Email] Email={to_email}, Trip={trip_id}")
+        log.error(f"[Email] Error: {str(e)}")
+        log.error("=" * 70)
+        import traceback
+        traceback.print_exc()
+
+
 def send_verification_email_sync(email: str, code: str) -> None:
     """
     Synchronous wrapper for sending verification email.

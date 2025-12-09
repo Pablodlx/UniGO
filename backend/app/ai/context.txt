@@ -65,10 +65,8 @@ UniGO es una aplicación de carpooling diseñada específicamente para estudiant
    - El 85% restante se transfiere al conductor vía Stripe Connect
 
 4. **Penalizaciones por cancelación:**
-   - Si el pasajero cancela >24h antes: 0% de penalización
-   - 12-24h antes: 30%
-   - 6-12h antes: 50%
-   - ≤6h antes: 80%
+   - Si cancelas un viaje con más de 24h de anticipación, se te devuelve el dinero completo (0% de penalización)
+   - Si cancelas dentro de las 24h previas al viaje, se te cobra el 100% del importe
 
 ## Cómo funciona Stripe Connect (IBAN del conductor)
 

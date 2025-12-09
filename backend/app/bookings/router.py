@@ -571,6 +571,53 @@ def reject_booking(
         db.refresh(system_message)
         db.refresh(notification)
         
+        # Enviar email al pasajero cuando su reserva es rechazada (después del commit exitoso)
+        try:
+            # Obtener datos del pasajero y conductor
+            passenger = db.query(User).filter(User.id == booking.passenger_id).first()
+            driver = db.query(User).filter(User.id == ride.driver_id).first()
+            
+            if passenger and driver and passenger.email:
+                # Formatear fecha y hora
+                departure_date_formatted = ride.departure_date.strftime("%d de %B de %Y")
+                # Capitalizar el mes en español
+                months_es = {
+                    "January": "enero", "February": "febrero", "March": "marzo",
+                    "April": "abril", "May": "mayo", "June": "junio",
+                    "July": "julio", "August": "agosto", "September": "septiembre",
+                    "October": "octubre", "November": "noviembre", "December": "diciembre"
+                }
+                for en, es in months_es.items():
+                    departure_date_formatted = departure_date_formatted.replace(en, es)
+                
+                passenger_name = passenger.full_name if passenger.full_name else passenger.email
+                driver_name = driver.full_name if driver.full_name else driver.email
+                
+                # Importar y enviar email síncrono
+                from app.core.email import send_booking_rejected_email_sync
+                
+                log.info(f"[BOOKING REJECT] [EMAIL] Enviando email de reserva rechazada a {passenger.email} para booking {booking.id}")
+                
+                # Enviar email directamente (síncrono, como send_trip_confirmed_email_sync)
+                send_booking_rejected_email_sync(
+                    to_email=passenger.email,
+                    passenger_name=passenger_name,
+                    driver_name=driver_name,
+                    departure_city=ride.departure_city,
+                    destination_city=ride.destination_city,
+                    departure_date=departure_date_formatted,
+                    departure_time=ride.departure_time,
+                    trip_id=ride.id,
+                )
+            else:
+                log.warning(f"[BOOKING REJECT] [EMAIL] No se pudo obtener datos del pasajero o conductor para booking {booking.id}")
+        except Exception as e:
+            # No hacer crash si falla el email, solo loguear
+            log.error(
+                f"[BOOKING REJECT] [EMAIL] ❌ Error al enviar email de reserva rechazada: {str(e)}",
+                exc_info=True
+            )
+        
         # Record the rejection to prevent retry loops
         # If this booking was created by an alert, record that this driver rejected it
         try:

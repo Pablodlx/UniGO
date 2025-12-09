@@ -293,6 +293,17 @@ export default function MyCardsPage() {
                   </button>
                 </div>
               ))}
+              
+              {/* Cancellation Policy Card */}
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow">
+                <h3 className="text-blue-800 font-semibold mb-3 flex items-center gap-2">
+                  ⚠️ Política de cancelación
+                </h3>
+                <p className="text-blue-900 text-sm leading-relaxed">
+                  Si cancelas un viaje con más de 24h de anticipación, se te devuelve el dinero.<br/><br/>
+                  Si cancelas dentro de las 24h previas al viaje, se te cobra el 100% del importe.
+                </p>
+              </div>
             </div>
           )}
 
