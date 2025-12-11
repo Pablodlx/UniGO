@@ -1035,8 +1035,28 @@ def match_search_alerts_with_trip(db: Session, trip: Ride) -> None:
     
     print(f"[TRIP MATCHING] Found {len(matching_alerts)} active search alerts matching trip {trip.id}")
     
+    # Get all rejections for matching alerts to prevent re-booking trips that were previously rejected
+    from app.auth.models import AlertDriverRejection
+    alert_ids = [alert.id for alert in matching_alerts]
+    rejections = []
+    if alert_ids:
+        rejections = db.query(AlertDriverRejection).filter(
+            AlertDriverRejection.alert_id.in_(alert_ids),
+            AlertDriverRejection.trip_id == trip.id,
+            AlertDriverRejection.driver_id == trip.driver_id,
+        ).all()
+    rejected_alert_ids = {r.alert_id for r in rejections}
+    if rejected_alert_ids:
+        print(f"[TRIP MATCHING] Found {len(rejected_alert_ids)} alerts that already rejected this trip/driver combination")
+    
     bookings_created = 0
     for alert in matching_alerts:
+        # Skip if this alert already rejected this trip/driver combination
+        if alert.id in rejected_alert_ids:
+            logger.info(f"[ALERT] Skipping alert {alert.id} - driver {trip.driver_id} already rejected this alert for trip {trip.id}")
+            print(f"  Skipping alert {alert.id}: Driver {trip.driver_id} already rejected this alert")
+            continue
+        
         # Parse alert target_time (format: "HH:MM")
         try:
             alert_time_parts = alert.target_time.split(":")
@@ -1447,12 +1467,27 @@ def match_existing_trips_with_alert(db: Session, alert: SearchAlert) -> None:
     
     print(f"[ALERT MATCHING] Selected {len(best_trips)} best trips (one per date) for alert {alert.id}")
     
+    # Get rejected drivers for this alert to prevent re-booking trips that were previously rejected
+    from app.auth.models import AlertDriverRejection
+    rejections = db.query(AlertDriverRejection).filter(
+        AlertDriverRejection.alert_id == alert.id
+    ).all()
+    rejected_trip_driver_pairs = {(r.trip_id, r.driver_id) for r in rejections}
+    if rejected_trip_driver_pairs:
+        print(f"[ALERT MATCHING] Alert {alert.id} has {len(rejected_trip_driver_pairs)} rejected trip/driver combinations")
+    
     # Create bookings and notifications for best trips only
     bookings_created = 0
     for trip in best_trips:
         # Skip if user is the driver (can't book their own ride)
         if alert.user_id == trip.driver_id:
             print(f"  Skipping trip {trip.id}: User {alert.user_id} is the driver")
+            continue
+        
+        # Skip if this trip/driver combination was already rejected for this alert
+        if (trip.id, trip.driver_id) in rejected_trip_driver_pairs:
+            logger.info(f"[ALERT] Skipping trip {trip.id} - driver {trip.driver_id} already rejected alert {alert.id}")
+            print(f"  Skipping trip {trip.id}: Driver {trip.driver_id} already rejected this alert")
             continue
         
         # REGLA 4: Mantener el control de que NO se puede generar más de una reserva automática para el mismo trip
@@ -1951,6 +1986,228 @@ def cancel_all_auto_bookings_for_alert(db: Session, alert: SearchAlert) -> None:
             continue
     
     print(f"Rejected {canceled_count} auto-bookings for deleted alert {alert.id}")
+
+
+def _trip_matches_alert_criteria(trip: Ride, alert: SearchAlert) -> bool:
+    """
+    Check if a trip matches all the criteria of an alert.
+    
+    Args:
+        trip: The Ride object to check
+        alert: The SearchAlert object with criteria
+    
+    Returns:
+        True if the trip matches all criteria, False otherwise
+    """
+    from datetime import date as date_type
+    
+    # Check destination match (text OR distance)
+    destination_matches = False
+    if trip.destination_city and alert.destination:
+        trip_dest_lower = trip.destination_city.lower().strip()
+        alert_dest_lower = alert.destination.lower().strip()
+        destination_matches = trip_dest_lower in alert_dest_lower or alert_dest_lower in trip_dest_lower
+    
+    # Distance match (only if allow_nearby_search is True and coordinates available)
+    if not destination_matches and alert.allow_nearby_search:
+        if (alert.destination_lat is not None and alert.destination_lng is not None and 
+            trip.destination_lat is not None and trip.destination_lng is not None):
+            dest_dist = haversine(
+                alert.destination_lat,
+                alert.destination_lng,
+                trip.destination_lat,
+                trip.destination_lng
+            )
+            destination_matches = dest_dist <= 1.0
+    
+    if not destination_matches:
+        return False
+    
+    # Check origin match - optional
+    origin_matches = True  # Default to True if no origin specified
+    if alert.origin:
+        origin_matches = False
+        if trip.departure_city:
+            trip_orig_lower = trip.departure_city.lower().strip()
+            alert_orig_lower = alert.origin.lower().strip()
+            origin_matches = trip_orig_lower in alert_orig_lower or alert_orig_lower in trip_orig_lower
+        
+        # Distance match (only if allow_nearby_search is True and coordinates available and text didn't match)
+        if not origin_matches and alert.allow_nearby_search:
+            if (alert.origin_lat is not None and alert.origin_lng is not None and 
+                trip.departure_lat is not None and trip.departure_lng is not None):
+                origin_dist = haversine(
+                    alert.origin_lat,
+                    alert.origin_lng,
+                    trip.departure_lat,
+                    trip.departure_lng
+                )
+                origin_matches = origin_dist <= 1.0
+    
+    if not origin_matches:
+        return False
+    
+    # Check date matching
+    trip_date = trip.departure_date.date()
+    trip_day_of_week = trip.departure_date.weekday()
+    date_matches = False
+    
+    # CASE 1: Alert uses specific_dates (PRIORITY)
+    if alert.specific_dates and len(alert.specific_dates) > 0:
+        # Normalize dates for comparison
+        alert_specific_dates_normalized = []
+        for d in alert.specific_dates:
+            if isinstance(d, date_type):
+                alert_specific_dates_normalized.append(d)
+            elif isinstance(d, str):
+                alert_specific_dates_normalized.append(date_type.fromisoformat(d))
+            else:
+                alert_specific_dates_normalized.append(d.date() if hasattr(d, 'date') else date_type.fromisoformat(str(d)))
+        date_matches = trip_date in alert_specific_dates_normalized
+    # CASE 2: Alert uses days_of_week (only if no specific_dates)
+    elif alert.days_of_week and len(alert.days_of_week) > 0:
+        date_matches = trip_day_of_week in alert.days_of_week
+    else:
+        # No date criteria, skip
+        return False
+    
+    if not date_matches:
+        return False
+    
+    # Parse alert target_time and trip departure_time
+    try:
+        alert_time_parts = alert.target_time.split(":")
+        alert_hour = int(alert_time_parts[0])
+        alert_minute = int(alert_time_parts[1])
+        alert_time_minutes = alert_hour * 60 + alert_minute
+        
+        trip_time_parts = trip.departure_time.split(":")
+        trip_hour = int(trip_time_parts[0])
+        trip_minute = int(trip_time_parts[1])
+        trip_time_minutes = trip_hour * 60 + trip_minute
+        
+        # Check if trip time is within flexibility range
+        time_diff = abs(trip_time_minutes - alert_time_minutes)
+        if time_diff > alert.flexibility_minutes:
+            return False
+    except (ValueError, IndexError):
+        return False
+    
+    # All criteria match
+    return True
+
+
+def cancel_all_auto_bookings_by_alert_id(db: Session, alert: SearchAlert) -> None:
+    """
+    Cancel automatic bookings that were created by a specific alert but no longer match the alert criteria.
+    This is used when an alert is edited and we need to cancel old bookings that don't match the new criteria.
+    
+    IMPORTANT: Only cancels bookings whose trips no longer match the updated alert criteria.
+    Bookings whose trips still match the new criteria are kept.
+    
+    IMPORTANT: Also records rejections in AlertDriverRejection to prevent the alert from
+    creating new bookings for the same trips that were canceled.
+    
+    Args:
+        db: Database session
+        alert: The updated SearchAlert object with new criteria
+    """
+    from app.bookings.service import cancel_booking_from_passenger
+    from app.auth.models import AlertDriverRejection
+    from datetime import datetime, timezone
+    
+    try:
+        # Find all bookings that were created by this alert and are still pending or confirmed
+        auto_bookings = db.query(Booking).filter(
+            Booking.search_alert_id == alert.id,
+            Booking.status.in_([BookingStatus.pending, BookingStatus.confirmed])
+        ).all()
+        
+        canceled_count = 0
+        kept_count = 0
+        rejections_recorded = 0
+        for booking in auto_bookings:
+            try:
+                # Get the ride to check if it still matches
+                ride = booking.ride
+                if not ride:
+                    print(f"[ALERT UPDATE] Warning: Booking {booking.id} has no associated ride, canceling it")
+                    # Cancel booking if ride doesn't exist
+                    cancel_booking_from_passenger(
+                        db=db,
+                        booking=booking,
+                        reason="debido a que se modificó la alerta de búsqueda automática.",
+                        final_status=BookingStatus.canceled,
+                        background_tasks=None,
+                    )
+                    canceled_count += 1
+                    continue
+                
+                # Check if the trip still matches the updated alert criteria
+                if _trip_matches_alert_criteria(ride, alert):
+                    # Trip still matches, keep the booking
+                    kept_count += 1
+                    print(f"[ALERT UPDATE] Keeping booking {booking.id} - trip {ride.id} still matches alert {alert.id} criteria")
+                    continue
+                
+                # Trip no longer matches, cancel the booking
+                print(f"[ALERT UPDATE] Canceling booking {booking.id} - trip {ride.id} no longer matches alert {alert.id} criteria")
+                
+                # Record rejection in AlertDriverRejection to prevent re-booking
+                # This ensures the alert won't create new bookings for this trip/driver combination
+                try:
+                    existing_rejection = db.query(AlertDriverRejection).filter(
+                        AlertDriverRejection.alert_id == alert.id,
+                        AlertDriverRejection.trip_id == ride.id,
+                        AlertDriverRejection.driver_id == ride.driver_id,
+                    ).first()
+                    
+                    if not existing_rejection:
+                        rejection = AlertDriverRejection(
+                            alert_id=alert.id,
+                            trip_id=ride.id,
+                            driver_id=ride.driver_id,
+                            rejected_at=datetime.now(timezone.utc),
+                        )
+                        db.add(rejection)
+                        rejections_recorded += 1
+                        print(f"[ALERT UPDATE] Recorded rejection: alert {alert.id}, trip {ride.id}, driver {ride.driver_id}")
+                    else:
+                        print(f"[ALERT UPDATE] Rejection already exists for alert {alert.id}, trip {ride.id}, driver {ride.driver_id}")
+                except Exception as e:
+                    print(f"[ALERT UPDATE] Error recording rejection for booking {booking.id}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # Continue with cancellation even if rejection recording fails
+                
+                # Use centralized cancellation function
+                cancel_booking_from_passenger(
+                    db=db,
+                    booking=booking,
+                    reason="debido a que se modificó la alerta de búsqueda automática.",
+                    final_status=BookingStatus.canceled,  # Use canceled (not rejected) when alert is modified
+                    background_tasks=None,  # No background_tasks available in service context
+                )
+                canceled_count += 1
+                print(f"[ALERT UPDATE] Canceled auto-booking {booking.id} for edited alert {alert.id}")
+            except Exception as e:
+                print(f"Error processing booking {booking.id}: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
+        
+        # Commit rejections
+        try:
+            db.commit()
+        except Exception as e:
+            print(f"[ALERT UPDATE] Error committing rejections: {e}")
+            db.rollback()
+        
+        print(f"[ALERT UPDATE] ✅ Canceled {canceled_count} auto-bookings, kept {kept_count} bookings, and recorded {rejections_recorded} rejections for edited alert {alert.id}")
+    except Exception as e:
+        print(f"Error canceling auto-bookings for alert {alert.id}: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def retry_search_for_rejected_auto_booking(db: Session, passenger_id: int, rejected_ride_id: int) -> None:

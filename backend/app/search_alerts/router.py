@@ -6,7 +6,7 @@ from app.auth.models import User, SearchAlert
 from app.auth.router import get_current_user
 from app.db.session import get_db
 from app.search_alerts.schemas import SearchAlertCreate, SearchAlertOut, SearchAlertUpdate
-from app.rides.service import match_existing_trips_with_alert, cancel_auto_bookings_for_dates, match_trips_for_specific_dates, cancel_all_auto_bookings_for_alert
+from app.rides.service import match_existing_trips_with_alert, cancel_auto_bookings_for_dates, match_trips_for_specific_dates, cancel_all_auto_bookings_for_alert, cancel_all_auto_bookings_by_alert_id
 
 router = APIRouter(prefix="/search-alerts", tags=["Search Alerts"])
 
@@ -173,31 +173,58 @@ def update_search_alert(
     if not alert:
         raise HTTPException(status_code=404, detail="Search alert not found")
     
-    # Save old dates before updating (for comparison)
+    # Save old values before updating (for comparison)
     old_specific_dates = set(alert.specific_dates) if alert.specific_dates else set()
+    old_days_of_week = set(alert.days_of_week) if alert.days_of_week else set()
     old_origin = alert.origin
     old_destination = alert.destination
+    old_origin_lat = alert.origin_lat
+    old_origin_lng = alert.origin_lng
+    old_destination_lat = alert.destination_lat
+    old_destination_lng = alert.destination_lng
     old_target_time = alert.target_time
     old_flexibility_minutes = alert.flexibility_minutes
+    old_allow_nearby_search = alert.allow_nearby_search
+    
+    # Track if any field changed (excluding dates, which are handled separately)
+    any_field_changed = False
     
     # Update fields if provided
     if alert_data.origin is not None:
+        if alert.origin != alert_data.origin:
+            any_field_changed = True
         alert.origin = alert_data.origin
     if alert_data.destination is not None:
+        if alert.destination != alert_data.destination:
+            any_field_changed = True
         alert.destination = alert_data.destination
     if alert_data.origin_lat is not None:
+        if alert.origin_lat != alert_data.origin_lat:
+            any_field_changed = True
         alert.origin_lat = alert_data.origin_lat
     if alert_data.origin_lng is not None:
+        if alert.origin_lng != alert_data.origin_lng:
+            any_field_changed = True
         alert.origin_lng = alert_data.origin_lng
     if alert_data.destination_lat is not None:
+        if alert.destination_lat != alert_data.destination_lat:
+            any_field_changed = True
         alert.destination_lat = alert_data.destination_lat
     if alert_data.destination_lng is not None:
+        if alert.destination_lng != alert_data.destination_lng:
+            any_field_changed = True
         alert.destination_lng = alert_data.destination_lng
     if alert_data.target_time is not None:
+        if alert.target_time != alert_data.target_time:
+            any_field_changed = True
         alert.target_time = alert_data.target_time
     if alert_data.flexibility_minutes is not None:
+        if alert.flexibility_minutes != alert_data.flexibility_minutes:
+            any_field_changed = True
         alert.flexibility_minutes = alert_data.flexibility_minutes
     if alert_data.allow_nearby_search is not None:
+        if alert.allow_nearby_search != alert_data.allow_nearby_search:
+            any_field_changed = True
         alert.allow_nearby_search = alert_data.allow_nearby_search
     if alert_data.active is not None:
         alert.active = alert_data.active
@@ -222,14 +249,20 @@ def update_search_alert(
             new_specific_dates = []
     
     # Handle days_of_week (only if specific_dates is not being set)
+    new_days_of_week = None
     if alert_data.days_of_week is not None and (alert_data.specific_dates is None or len(alert_data.specific_dates) == 0):
         if len(alert_data.days_of_week) > 0:
+            new_days_of_week = set(alert_data.days_of_week)
+            if new_days_of_week != old_days_of_week:
+                any_field_changed = True
             alert.days_of_week = alert_data.days_of_week
             # If days_of_week is provided and specific_dates is empty, clear specific_dates
             if alert_data.specific_dates is not None:
                 alert.specific_dates = None
                 new_specific_dates = []
         else:
+            if old_days_of_week:
+                any_field_changed = True
             alert.days_of_week = None
     
     # Determine new dates set (for comparison)
@@ -239,9 +272,18 @@ def update_search_alert(
     removed_dates = list(old_specific_dates - new_specific_dates_set)
     added_dates = list(new_specific_dates_set - old_specific_dates)
     
-    # If dates were removed, cancel bookings for those dates
-    # Use old alert values since bookings were created with those criteria
-    if removed_dates and len(removed_dates) > 0:
+    # Check if dates changed (but don't set any_field_changed yet - we'll handle dates separately)
+    dates_changed = bool(removed_dates or added_dates)
+    
+    # Determine if we need to cancel all bookings and re-match
+    # We need to do this if:
+    # 1. Any non-date field changed (origin, destination, time, flexibility, etc.)
+    # 2. Dates were added (need to re-match with new criteria)
+    # 3. Dates were removed AND other fields changed (need full re-match)
+    needs_full_rematch = any_field_changed or (added_dates and len(added_dates) > 0)
+    
+    # If only dates were removed (and no other fields changed), cancel bookings for those dates only
+    if removed_dates and len(removed_dates) > 0 and not any_field_changed and not added_dates:
         try:
             cancel_auto_bookings_for_dates(
                 db=db,
@@ -261,12 +303,25 @@ def update_search_alert(
     db.commit()
     db.refresh(alert)
     
-    # If dates were added, match existing trips for those new dates only
-    if added_dates and len(added_dates) > 0:
+    # If any field changed OR dates were added, cancel old auto-bookings that no longer match and re-match
+    if needs_full_rematch:
+        print(f"[ALERT UPDATE] Alert {alert.id} was modified. Canceling auto-bookings that no longer match and re-matching trips...")
         try:
-            match_trips_for_specific_dates(db, alert, added_dates)
+            # Cancel only bookings whose trips no longer match the updated alert criteria
+            cancel_all_auto_bookings_by_alert_id(db, alert)
         except Exception as e:
-            print(f"Error matching trips for added dates: {e}")
+            print(f"Error canceling old auto-bookings for alert {alert.id}: {e}")
+            import traceback
+            traceback.print_exc()
+            # Continue even if cancellation fails
+        
+        # Re-match trips with the updated alert (same as when creating a new alert)
+        try:
+            print(f"[ALERT UPDATE] Re-matching trips for updated alert {alert.id}...")
+            match_existing_trips_with_alert(db, alert)
+            print(f"[ALERT UPDATE] ✅ Finished re-matching trips for alert {alert.id}")
+        except Exception as e:
+            print(f"[ALERT UPDATE] ❌ ERROR re-matching trips for alert {alert.id}: {e}")
             import traceback
             traceback.print_exc()
             # Continue even if matching fails
