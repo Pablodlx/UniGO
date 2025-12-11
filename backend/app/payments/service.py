@@ -20,17 +20,17 @@ def calculate_penalty_percent(hours_before: float) -> float:
     """
     Calculate penalty percentage based on hours before departure.
     
+    Rules:
+    - If cancellation is MORE than 24 hours before departure: 0% (no penalty)
+    - If cancellation is WITHIN 24 hours before departure: 100% (full penalty)
+    
     Returns:
-        Penalty percentage (0.0 to 1.0)
+        Penalty percentage (0.0 or 1.0)
     """
     if hours_before > 24:
-        return 0.0
-    elif hours_before >= 12:
-        return 0.30
-    elif hours_before >= 6:
-        return 0.50
+        return 0.0  # No penalty if more than 24h before
     else:
-        return 0.80
+        return 1.0  # 100% penalty if within 24h
 
 
 def calculate_hours_before_departure(ride: Ride) -> Optional[float]:
@@ -94,31 +94,103 @@ def handle_passenger_cancellation(
             return None, str(e)
         return 0, None
     
-    # Calculate penalty amount
+    # Calculate penalty amount (100% of trip price when within 24h)
     penalty_cents = int(payment.amount_cents * penalty_percent)
-    refund_cents = payment.amount_cents - penalty_cents
+    
+    # When penalty_percent is 1.0 (100%), penalty_cents should equal payment.amount_cents
+    # No refund needed since we're charging 100%
     
     try:
         import stripe
         if not stripe.api_key:
             return None, "Stripe not configured"
         
-        # Capture only the penalty, refund the rest
+        # Capture the full penalty amount (100% of trip price)
         pi = stripe.PaymentIntent.retrieve(payment.stripe_payment_intent_id)
         
         if pi.status == "requires_capture":
-            # Capture penalty amount
-            stripe.PaymentIntent.capture(
+            # Capture full penalty amount (100% of trip price)
+            captured_pi = stripe.PaymentIntent.capture(
                 payment.stripe_payment_intent_id,
                 amount_to_capture=penalty_cents
             )
+            
+            # Calculate driver amount: 85% of the amount charged
+            # The platform keeps 15% (app_fee_cents)
+            driver_amount_cents = int(penalty_cents * 0.85)
+            app_fee_cents = penalty_cents - driver_amount_cents
+            
             payment.status = PaymentStatus.succeeded
             payment.penalty_cents = penalty_cents
-            payment.app_fee_cents = int(penalty_cents * get_app_commission_percent())
-            payment.driver_amount_cents = penalty_cents - payment.app_fee_cents
+            payment.app_fee_cents = app_fee_cents
+            payment.driver_amount_cents = driver_amount_cents
             payment.captured_at = datetime.now(timezone.utc)
             db.commit()
-            log.info(f"Captured penalty {penalty_cents} cents for booking {booking.id}")
+            log.info(f"Captured penalty {penalty_cents} cents (100% of trip) for booking {booking.id}")
+            log.info(f"Driver will receive {driver_amount_cents} cents (85% of {penalty_cents} cents)")
+            log.info(f"Platform fee: {app_fee_cents} cents (15% of {penalty_cents} cents)")
+            
+            # TRANSFER TO DRIVER (Stripe Connect) - Only for cancellations within 24h
+            # After capturing the penalty, transfer the driver's portion to their Connect account
+            try:
+                driver = db.query(User).filter(User.id == ride.driver_id).first()
+                
+                if driver and driver.stripe_account_id:
+                    driver_amount_cents = payment.driver_amount_cents
+                    
+                    log.info(f"[CANCEL PENALTY] [TRANSFER] Starting transfer for driver {ride.driver_id}")
+                    log.info(f"[CANCEL PENALTY] [TRANSFER] Driver stripe_account_id: {driver.stripe_account_id}")
+                    log.info(f"[CANCEL PENALTY] [TRANSFER] Amount to transfer: {driver_amount_cents} cents")
+                    
+                    # Verify account status before creating transfer
+                    try:
+                        account = stripe.Account.retrieve(driver.stripe_account_id)
+                        log.info(f"[CANCEL PENALTY] [TRANSFER] Account status: {account.id}")
+                        
+                        if account.capabilities.get('transfers') != 'active':
+                            log.warning(
+                                f"[CANCEL PENALTY] [TRANSFER] Account {driver.stripe_account_id} transfers capability "
+                                f"is not active: {account.capabilities.get('transfers')}"
+                            )
+                    except Exception as account_error:
+                        log.error(f"[CANCEL PENALTY] [TRANSFER] Error retrieving account: {account_error}")
+                    
+                    # Create transfer to driver's Connect account
+                    log.info(f"[CANCEL PENALTY] [TRANSFER] Creating transfer...")
+                    transfer = stripe.Transfer.create(
+                        amount=driver_amount_cents,
+                        currency="eur",
+                        destination=driver.stripe_account_id,
+                        transfer_group=f"trip_{ride.id}_cancel_penalty",
+                        metadata={
+                            "ride_id": str(ride.id),
+                            "booking_id": str(booking.id),
+                            "driver_id": str(driver.id),
+                            "payment_id": str(payment.id),
+                            "type": "cancellation_penalty",
+                        }
+                    )
+                    log.info(f"[CANCEL PENALTY] [TRANSFER] ✅ Transfer created successfully!")
+                    log.info(f"[CANCEL PENALTY] [TRANSFER] Transfer ID: {transfer.id}")
+                    log.info(f"[CANCEL PENALTY] [TRANSFER] Transfer amount: {transfer.amount} cents")
+                    log.info(f"[CANCEL PENALTY] [TRANSFER] Transfer destination: {transfer.destination}")
+                else:
+                    log.warning(
+                        f"[CANCEL PENALTY] [TRANSFER] Cannot create transfer: "
+                        f"driver={driver is not None}, stripe_account_id={driver.stripe_account_id if driver else 'N/A'}"
+                    )
+            except stripe.error.StripeError as stripe_error:
+                log.error(
+                    f"[CANCEL PENALTY] [TRANSFER] ❌ Stripe error creating transfer: {stripe_error}",
+                    exc_info=True
+                )
+                # Don't fail the cancellation if transfer fails, just log the error
+            except Exception as transfer_error:
+                log.error(
+                    f"[CANCEL PENALTY] [TRANSFER] ❌ Error creating transfer: {transfer_error}",
+                    exc_info=True
+                )
+                # Don't fail the cancellation if transfer fails, just log the error
         else:
             log.warning(f"PaymentIntent {payment.stripe_payment_intent_id} status is {pi.status}, cannot capture penalty")
             return None, f"Payment status is {pi.status}"
