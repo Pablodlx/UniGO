@@ -182,7 +182,8 @@ def get_my_bookings(
             db.commit()
     
     try:
-        # Get all bookings for this user (exclude canceled bookings)
+        # Get all bookings for this user (EXCLUDE canceled bookings from active list)
+        # Canceled bookings should only appear in history/registro, not in active bookings
         bookings = db.query(Booking).filter(
             and_(
                 Booking.passenger_id == current_user.id,
@@ -205,10 +206,10 @@ def get_my_bookings(
                 # Include bookings if:
                 # 1. The ride hasn't passed yet (future rides), OR
                 # 2. The booking is still pending (user needs to see pending status even if ride passed)
-                # 3. The ride is active
+                # Note: Canceled bookings are excluded from this list (they appear in history only)
                 should_include = (
-                    ride.is_active and 
-                    (check_datetime >= now or booking.status == BookingStatus.pending)
+                    check_datetime >= now or 
+                    booking.status == BookingStatus.pending
                 )
                 
                 if should_include:

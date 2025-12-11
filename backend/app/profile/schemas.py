@@ -12,6 +12,7 @@ class HomeAddress(BaseModel):
 
 class ProfileBase(BaseModel):
     # Campos obligatorios (RF-02) — pueden ser None en GET si aún no configurados
+    # NOTA: No añadir validaciones de regex aquí para no afectar otros endpoints
     full_name: constr(strip_whitespace=True, max_length=150) | None = None
     university: constr(strip_whitespace=True, max_length=150) | None = None
     degree: constr(strip_whitespace=True, max_length=150) | None = None

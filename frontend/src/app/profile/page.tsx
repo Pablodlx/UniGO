@@ -121,6 +121,7 @@ export default function ProfilePage() {
     handleSubmit,
     setValue,
     setError,
+    watch,
     formState: { errors, isDirty },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -510,7 +511,20 @@ export default function ProfilePage() {
                     Nombre *
                   </label>
                   <input
-                    {...register("first_name")}
+                    {...((): any => {
+                      const { onChange, ...rest } = register("first_name");
+                      return {
+                        ...rest,
+                        value: watch("first_name") || "",
+                        onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+                          const value = e.target.value;
+                          const regex = /^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]*$/;
+                          if (regex.test(value)) {
+                            setValue("first_name", value, { shouldValidate: true, shouldDirty: true });
+                          }
+                        },
+                      };
+                    })()}
                     className="w-full px-4 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-lg font-medium"
                     placeholder="Ej. Alberto"
                   />
@@ -524,7 +538,20 @@ export default function ProfilePage() {
                     Apellidos *
                   </label>
                   <input
-                    {...register("last_name")}
+                    {...((): any => {
+                      const { onChange, ...rest } = register("last_name");
+                      return {
+                        ...rest,
+                        value: watch("last_name") || "",
+                        onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+                          const value = e.target.value;
+                          const regex = /^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]*$/;
+                          if (regex.test(value)) {
+                            setValue("last_name", value, { shouldValidate: true, shouldDirty: true });
+                          }
+                        },
+                      };
+                    })()}
                     className="w-full px-4 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-lg font-medium"
                     placeholder="Ej. Fernández Rodríguez"
                   />
@@ -561,7 +588,20 @@ export default function ProfilePage() {
                     Carrera *
                   </label>
                   <input
-                    {...register("degree")}
+                    {...((): any => {
+                      const { onChange, ...rest } = register("degree");
+                      return {
+                        ...rest,
+                        value: watch("degree") || "",
+                        onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+                          const value = e.target.value;
+                          const regex = /^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]*$/;
+                          if (regex.test(value)) {
+                            setValue("degree", value, { shouldValidate: true, shouldDirty: true });
+                          }
+                        },
+                      };
+                    })()}
                     className="w-full px-4 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-lg font-medium"
                     placeholder="Ej. Ingeniería Informática"
                   />
