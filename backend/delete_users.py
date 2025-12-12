@@ -106,6 +106,12 @@ def delete_user_by_email(conn, email: str):
             if ride_booking_ids:
                 cur.execute("DELETE FROM payments WHERE booking_id = ANY(%s)", (ride_booking_ids,))
                 cur.execute("DELETE FROM bookings WHERE ride_id = ANY(%s)", (ride_ids,))
+            # Eliminar notificaciones que referencian estos rides
+            cur.execute("SELECT COUNT(*) FROM notifications WHERE ride_id = ANY(%s)", (ride_ids,))
+            count = cur.fetchone()[0]
+            if count > 0:
+                print(f"   - Eliminando {count} notificaciones relacionadas con estos viajes")
+                cur.execute("DELETE FROM notifications WHERE ride_id = ANY(%s)", (ride_ids,))
             # Eliminar mensajes de grupo de estos rides
             cur.execute("DELETE FROM trip_group_messages WHERE trip_id = ANY(%s)", (ride_ids,))
             # Eliminar mensajes de estos rides
