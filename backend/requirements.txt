@@ -37,8 +37,8 @@ platformdirs==4.4.0
 pluggy==1.6.0
 pre-commit==3.8.0
 prometheus_client==0.20.0
-psycopg==3.2.1
-psycopg-binary==3.2.1
+psycopg==3.2.13
+psycopg-binary==3.2.13
 psycopg2-binary==2.9.10
 pyasn1==0.6.1
 pycparser==2.23

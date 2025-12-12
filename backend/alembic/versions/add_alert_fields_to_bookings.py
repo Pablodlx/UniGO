@@ -23,8 +23,32 @@ def upgrade() -> None:
     from sqlalchemy import inspect
     conn = op.get_bind()
     inspector = inspect(conn)
+    tables = inspector.get_table_names()
     
-    if 'bookings' in inspector.get_table_names():
+    # Create search_alerts table if it doesn't exist
+    if 'search_alerts' not in tables:
+        op.create_table('search_alerts',
+            sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
+            sa.Column('user_id', sa.Integer(), nullable=False),
+            sa.Column('origin', sa.String(length=100), nullable=False),
+            sa.Column('destination', sa.String(length=100), nullable=False),
+            sa.Column('origin_lat', sa.Float(), nullable=True),
+            sa.Column('origin_lng', sa.Float(), nullable=True),
+            sa.Column('destination_lat', sa.Float(), nullable=True),
+            sa.Column('destination_lng', sa.Float(), nullable=True),
+            sa.Column('target_time', sa.String(length=10), nullable=False),
+            sa.Column('days_of_week', sa.ARRAY(sa.Integer()), nullable=True),
+            sa.Column('specific_dates', sa.ARRAY(sa.Date()), nullable=True),
+            sa.Column('flexibility_minutes', sa.Integer(), nullable=False, server_default='30'),
+            sa.Column('allow_nearby_search', sa.Boolean(), nullable=False, server_default='false'),
+            sa.Column('active', sa.Boolean(), nullable=False, server_default='true'),
+            sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+            sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
+            sa.PrimaryKeyConstraint('id')
+        )
+        op.create_index('ix_search_alerts_user_id', 'search_alerts', ['user_id'], unique=False)
+    
+    if 'bookings' in tables:
         columns = [col['name'] for col in inspector.get_columns('bookings')]
         
         # Add search_alert_id column
@@ -50,8 +74,9 @@ def downgrade() -> None:
     from sqlalchemy import inspect
     conn = op.get_bind()
     inspector = inspect(conn)
+    tables = inspector.get_table_names()
     
-    if 'bookings' in inspector.get_table_names():
+    if 'bookings' in tables:
         columns = [col['name'] for col in inspector.get_columns('bookings')]
         
         if 'created_by_alert' in columns:
@@ -61,4 +86,6 @@ def downgrade() -> None:
             op.drop_index('ix_bookings_search_alert_id', table_name='bookings')
             op.drop_constraint('fk_bookings_search_alert_id', 'bookings', type_='foreignkey')
             op.drop_column('bookings', 'search_alert_id')
+    
+    # Note: We don't drop search_alerts table here as it might be needed by other parts of the system
 

@@ -33,10 +33,20 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_trip_group_messages_sender_id'), 'trip_group_messages', ['sender_id'], unique=False)
     op.create_index(op.f('ix_trip_group_messages_trip_id'), 'trip_group_messages', ['trip_id'], unique=False)
-    op.alter_column('bookings', 'status',
-               existing_type=sa.VARCHAR(length=50),
-               type_=sa.Enum('pending', 'confirmed', 'canceled', name='bookingstatus'),
-               existing_nullable=False)
+    
+    # Create the bookingstatus enum type first (if it doesn't exist)
+    op.execute("DO $$ BEGIN CREATE TYPE bookingstatus AS ENUM ('pending', 'confirmed', 'canceled'); EXCEPTION WHEN duplicate_object THEN null; END $$;")
+    
+    # Convert the status column from VARCHAR to ENUM
+    # First, ensure all existing values are valid enum values
+    op.execute("""
+        UPDATE bookings 
+        SET status = 'pending' 
+        WHERE status NOT IN ('pending', 'confirmed', 'canceled')
+    """)
+    
+    # Now alter the column type
+    op.execute("ALTER TABLE bookings ALTER COLUMN status TYPE bookingstatus USING status::bookingstatus")
     op.drop_index('ix_bookings_passenger_id', table_name='bookings')
     op.drop_index('ix_bookings_ride_id', table_name='bookings')
     op.drop_index('ix_favorite_rides_user_id', table_name='favorite_rides')
@@ -56,10 +66,12 @@ def downgrade() -> None:
     op.create_index('ix_favorite_rides_user_id', 'favorite_rides', ['user_id'], unique=False)
     op.create_index('ix_bookings_ride_id', 'bookings', ['ride_id'], unique=False)
     op.create_index('ix_bookings_passenger_id', 'bookings', ['passenger_id'], unique=False)
-    op.alter_column('bookings', 'status',
-               existing_type=sa.Enum('pending', 'confirmed', 'canceled', name='bookingstatus'),
-               type_=sa.VARCHAR(length=50),
-               existing_nullable=False)
+    
+    # Convert back from ENUM to VARCHAR
+    op.execute("ALTER TABLE bookings ALTER COLUMN status TYPE VARCHAR(50) USING status::text")
+    
+    # Note: We don't drop the enum type here because it might be used elsewhere
+    # or might have been added by a later migration (like the rejected value)
     op.drop_index(op.f('ix_trip_group_messages_trip_id'), table_name='trip_group_messages')
     op.drop_index(op.f('ix_trip_group_messages_sender_id'), table_name='trip_group_messages')
     op.drop_table('trip_group_messages')

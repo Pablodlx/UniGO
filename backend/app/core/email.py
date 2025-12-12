@@ -16,12 +16,12 @@ from typing import Optional
 
 import aiosmtplib
 import httpx
-import nest_asyncio
 
 from app.core.config import settings
 
-# Apply nest_asyncio to allow nested event loops
-nest_asyncio.apply()
+# Note: nest_asyncio is not applied here because it's incompatible with uvloop
+# The sync email functions (send_verification_email_sync, etc.) use httpx.Client
+# which doesn't require asyncio, so nest_asyncio is not needed.
 
 log = logging.getLogger(__name__)
 
