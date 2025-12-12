@@ -135,63 +135,15 @@ Instala dependencias y crea el entorno virtual:
 make backend-setup
 ```
 
-### 4. Configurar Variables de Entorno
 
-Crea el archivo `.env` en el directorio `backend/`:
 
-```bash
-cd backend
-cp .env.example .env  # Si existe un ejemplo
-nano .env              # O crea el archivo manualmente
-```
-
-**Plantilla mínima de configuración:**
-
-```env
-# Seguridad
-SECRET_KEY=tu-clave-secreta-super-segura-cambia-esto
-
-# Base de Datos
-DATABASE_URL=postgresql+psycopg2://unigo:unigo@localhost:5432/unigo
-
-# JWT
-ACCESS_TOKEN_EXPIRE_MINUTES=60
-
-# Email (Desarrollo con MailHog)
-EMAIL_BACKEND=mailhog
-SMTP_HOST=127.0.0.1
-SMTP_PORT=1025
-
-# Email (Producción - Mailjet)
-# EMAIL_BACKEND=mailjet
-# MAILJET_API_KEY=tu-api-key
-# MAILJET_SECRET_KEY=tu-secret-key
-# EMAIL_FROM=noreply@tudominio.com
-# EMAIL_FROM_NAME=UniGO
-
-# Dominios universitarios permitidos
-ALLOWED_EMAIL_DOMAINS=ugr.es,us.es,uma.es,ucm.es,upm.es,uab.cat,ub.edu,uoc.edu
-
-# Stripe (Opcional)
-# STRIPE_SECRET_KEY=sk_test_xxx
-# STRIPE_PUBLIC_KEY=pk_test_xxx
-# STRIPE_WEBHOOK_SECRET=whsec_xxx
-# APP_COMMISSION_PERCENT=15
-```
-
-**Vuelve al directorio raíz:**
-
-```bash
-cd ..
-```
-
-### 5. Ejecutar Migraciones
+### 4. Ejecutar Migraciones
 
 ```bash
 make migrate
 ```
 
-### 6. Iniciar Backend
+### 5. Iniciar Backend
 
 ```bash
 make backend
@@ -199,7 +151,7 @@ make backend
 
 El backend estará disponible en: http://127.0.0.1:8000
 
-### 7. Configurar Frontend
+### 6. Configurar Frontend
 
 En otra terminal, instala dependencias del frontend:
 
@@ -207,15 +159,9 @@ En otra terminal, instala dependencias del frontend:
 make frontend-setup
 ```
 
-Crea el archivo `frontend/.env.local`:
 
-```env
-NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000/api
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=tu-google-maps-api-key
-NEXT_PUBLIC_STRIPE_PUBLIC_KEY=pk_test_xxx  # Opcional
-```
 
-### 8. Iniciar Frontend
+### 7. Iniciar Frontend
 
 ```bash
 make frontend
@@ -262,13 +208,7 @@ EMAIL_FROM=noreply@tudominio.com
 EMAIL_FROM_NAME=UniGO
 ```
 
-#### Producción (SendGrid)
-```env
-EMAIL_BACKEND=sendgrid
-SENDGRID_API_KEY=tu-api-key
-EMAIL_FROM=noreply@tudominio.com
-EMAIL_FROM_NAME=UniGO
-```
+
 
 #### Producción (SMTP Genérico)
 ```env
@@ -282,32 +222,8 @@ EMAIL_FROM=tu-email@gmail.com
 EMAIL_FROM_NAME=UniGO
 ```
 
-### Configuración de Google Maps
 
-1. Obtén una API Key en [Google Cloud Console](https://console.cloud.google.com/)
-2. Habilita las APIs: Maps JavaScript API, Places API, Geocoding API
-3. Añade la key en `frontend/.env.local`:
-   ```env
-   NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=tu-api-key
-   ```
 
-### Configuración de Stripe
-
-1. Crea una cuenta en [Stripe](https://stripe.com/)
-2. Obtén tus API keys (modo test para desarrollo)
-3. Configura en `backend/.env`:
-   ```env
-   STRIPE_SECRET_KEY=sk_test_xxx
-   STRIPE_PUBLIC_KEY=pk_test_xxx
-   STRIPE_WEBHOOK_SECRET=whsec_xxx
-   APP_COMMISSION_PERCENT=15
-   ```
-4. Configura en `frontend/.env.local`:
-   ```env
-   NEXT_PUBLIC_STRIPE_PUBLIC_KEY=pk_test_xxx
-   ```
-
----
 
 ## 📖 Uso
 
@@ -492,26 +408,6 @@ make infra-down
 
 Esto detendrá y eliminará todos los contenedores Docker.
 
----
-
-## 🤝 Contribuir
-
-Las contribuciones son bienvenidas. Por favor:
-
-1. Fork el proyecto
-2. Crea una rama para tu feature (`git checkout -b feature/AmazingFeature`)
-3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
-4. Push a la rama (`git push origin feature/AmazingFeature`)
-5. Abre un Pull Request
-
-### Estándares de Código
-
-- Usa `make fmt` antes de commitear
-- Ejecuta `make lint` y corrige errores
-- Escribe tests para nuevas funcionalidades
-- Documenta código complejo
-
----
 
 ## 📝 Licencia
 
@@ -525,15 +421,7 @@ Este proyecto es propiedad de **Equipo UniGO - 2025**.
 
 ---
 
-## 🆘 Soporte
 
-Si encuentras algún problema:
-
-1. Revisa la documentación
-2. Verifica los logs (`make infra-logs`)
-3. Abre un issue en GitHub con detalles del error
-
----
 
 <div align="center">
 
